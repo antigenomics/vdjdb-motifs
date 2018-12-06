@@ -1,0 +1,337 @@
+---
+title: "Inferring motifs from VDJdb and building motif PWMs"
+author: "M.S."
+date: "12/5/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(data.table)
+library(stringr)
+library(stringdist)
+library(reshape2)
+library(igraph)
+library(ggplot2)
+```
+
+## Export VDJdb to VDJtools format
+
+Load latest DB for human
+
+```{r}
+df.vdjdb = fread("vdjdb_dump/vdjdb.slim.txt") %>%
+  filter(species %in% c("HomoSapiens", "MusMusculus"),
+         v.segm != "", j.segm != "", !is.na(j.segm)) %>%
+  select(cdr3, v.segm, j.segm, v.end, j.start, antigen.epitope, gene, species) %>%
+  unique
+```
+
+Select epitopes
+
+```{r}
+dt.epi.count = df.vdjdb %>%
+  group_by(species, gene, antigen.epitope) %>%
+  summarise(total = n()) %>%
+  arrange(-total)
+
+dt.epi.count %>% head(n=10)
+
+df.vdjdb.good = df.vdjdb %>%
+  merge(dt.epi.count %>% filter(total >= 30))
+```
+Back translate mock functions
+
+```{r}
+mock_codons <- c('GCT', 'TGT', 'GAT', 'GAA', 'TTT',
+                 'GGT', 'ATT', 'CAT', 'AAA', 'TTA',
+                 'ATG', 'AAT', 'CCT', 'CAA', 'CGT',
+                 'TCT', 'ACT', 'GTT', 'TGG', 'TAT')
+
+names(mock_codons) <- c('A', 'C', 'D', 'E', 'F',
+                        'G', 'I', 'H', 'K', 'L',
+                        'M', 'N', 'P', 'Q', 'R',
+                        'S', 'T', 'V', 'W', 'Y')
+
+mock_back_translate <- function(x) {
+  paste0(mock_codons[x], collapse = "")
+}
+
+# "CASS" %>% strsplit('') %>% lapply(mock_back_translate)
+```
+
+Convert to VDJtools format
+
+```{r}
+df.vdjtools <- df.vdjdb.good %>%
+  mutate(count = 1,
+         cdr3aa = cdr3,
+         cdr3nt = cdr3 %>% 
+           strsplit('') %>% 
+           lapply(mock_back_translate),
+         v = v.segm, d = "", j = j.segm,
+         vend = v.end, dstart = -1, dend = -1, jstart = j.start) %>% # 1-based, inclusive
+  group_by(gene, antigen.epitope, species) %>%
+  mutate(freq = count / sum(count)) %>%
+  select(count, freq, cdr3nt, cdr3aa, v, d, j, vend, dstart, dend, jstart, 
+         gene, antigen.epitope, species)
+```
+
+Write separate VDJtools file for each epitope
+
+```{r}
+system("mkdir vdjdb_export/")
+
+df.vdjtools %>%
+  group_by(gene, antigen.epitope, species) %>%
+  do(data.frame(
+    fwrite(., paste0("vdjdb_export/", .$species[1], ".",
+                     .$gene[1], ".", .$antigen.epitope[1], ".txt"), sep = "\t", quote = F)
+    ))
+```
+
+## Run TCRNET
+
+List VDJdb split files
+
+```{r}
+filenames <- list.files("vdjdb_export/")
+tmp <- str_split_fixed(filenames, fixed("."), 4)[,1:3]
+df.files <- data.frame(file.name = filenames, species = tmp[,1], gene = tmp[,2]) %>%
+  mutate(species = ifelse(species == "HomoSapiens", "human", "mouse"),
+         gene = tolower(gene)) %>%
+  mutate(input = paste0("vdjdb_export/", file.name),
+         background = paste0("pools/", species, ".", gene, ".aa.txt"))
+```
+
+Run TCRNET via vdjtools
+         
+```{r}
+df.files %>%
+  group_by(background) %>%
+  summarise(cmd = paste0("/software/bin/vdjtools -Xmx100G CalcDegreeStats -o 1,0,1 -g2 dummy -b ",
+         background[1], " ", paste(input, collapse = " "), " tcrnet/")) %>%
+  group_by(background) %>%
+  do(data.frame(system(.$cmd)))
+```
+
+Load results
+
+```{r}
+df.tcrnet <- filenames %>%
+  lapply(function(x) fread(paste0("tcrnet/", x)) %>%
+                             mutate(file.name = x)) %>%
+  rbindlist %>%
+  merge(data.frame(file.name = filenames, 
+                   species = tmp[,1], 
+                   gene = tmp[,2],
+                   antigen.epitope = tmp[,3]))
+```
+
+Adjust P-values and select enriched variants
+
+```{r}
+df.tcrnet <- df.tcrnet %>%
+  group_by(species, gene, antigen.epitope) %>%
+  mutate(p.adj = p.value.g) %>%
+  ungroup %>%
+  mutate(enriched = degree.s >= 3 & p.adj < 0.05)
+```
+
+## Analyze CDR3 graphs
+
+Build hamming graph around enriched CDR3s
+
+```{r}
+compute_edges <- function(cdr3.1, cdr3.2, combine) {
+  if (combine) {
+    cdr3.1 <- c(cdr3.1, cdr3.2) %>% unique
+    cdr3.2 <- cdr3.1
+  }
+  
+  stringdistmatrix(cdr3.1, cdr3.2, 
+                   method = "hamming", 
+                   nthread = 80,
+                   useNames = "strings") %>%
+    as.matrix %>%
+    melt %>% 
+    filter(value == 1) %>%
+    mutate(cdr3.from = as.character(Var1), 
+           cdr3.to = as.character(Var2)) %>%
+    select(-Var1, -Var2, -value) %>%
+    unique
+}
+
+# I - between enriched and neighbors
+df.graph.e <- df.tcrnet %>%
+  group_by(species, gene, antigen.epitope) %>%
+  do(compute_edges(.$cdr3aa[which(.$enriched)], .$cdr3aa, F)) %>%
+  ungroup
+
+# II - between all from previous graph
+df.graph <- df.graph.e %>%
+  group_by(species, gene, antigen.epitope) %>%
+  do(compute_edges(.$cdr3.from, .$cdr3.to, T)) %>%
+  ungroup
+```
+
+Select connected componenets/clusters with motifs
+
+```{r}
+compute_cc <- function(from, to) {
+  cc <- data.frame(from, to) %>%
+    graph_from_data_frame() %>%
+    simplify %>%
+    clusters
+  
+  data.frame(cdr3aa = names(cc$membership),
+             cid = cc$membership,
+             stringsAsFactors = F)
+}
+
+df.cc <- df.graph %>%
+  group_by(species, gene, antigen.epitope) %>%
+  do(compute_cc(.$cdr3.from, .$cdr3.to)) %>%
+  ungroup %>%
+  mutate(cid = paste(substr(species, 1, 1),
+                     substr(gene, 3, 3),
+                     antigen.epitope,
+                     cid, sep = ".")) %>%
+  group_by(cid) %>%
+  mutate(csz = n()) %>%
+  ungroup
+
+most_freq_segm <- function(segm) {
+  segm <- str_split_fixed(segm, ",", 2)[,1]
+  names(sort(table(segm), decreasing=T))[1]
+}
+
+df.cc <- df.cc %>%
+  merge(df.vdjdb %>% 
+          mutate(cdr3aa = cdr3) %>% 
+          filter(cdr3aa %in% df.cc$cdr3aa) %>%
+          select(-cdr3)) %>%
+  group_by(cid) %>%
+  # select representative V/J
+  mutate(v.segm.repr = most_freq_segm(v.segm), 
+         j.segm.repr = most_freq_segm(j.segm)) %>%
+  ungroup
+```
+
+Select and write large clusters
+
+```{r}
+df.cc.sel <- df.cc %>%
+  filter(csz >= 5)
+
+fwrite(df.cc.sel, "cluster_members.txt", sep = "\t")
+```
+
+## Compute position-weight matrices for motifs
+
+Flatten CDR3 sequences
+
+```{r}
+df.flataa <- df.cc.sel %>%
+  .$cdr3aa %>% 
+  unique %>%
+  strsplit("") %>%
+  mclapply(function(x) data.frame(cdr3aa = paste0(x, collapse = ""), 
+                                  aa = x, stringsAsFactors = F) %>% mutate(pos = 0:(n()-1)), mc.cores = 80) %>%
+  rbindlist
+```
+
+Append sequences and compute PWMs
+
+```{r}
+df.pwms <- df.cc.sel %>%
+  merge(df.flataa) %>%
+  mutate(len = nchar(cdr3aa)) %>%
+  group_by(species, gene, antigen.epitope,
+           v.segm.repr, j.segm.repr, cid, csz, aa, pos, len) %>%
+  summarise(count = n())
+```
+
+Load background PWMs for normalization
+
+```{r}
+df.bg.pwms <- expand.grid(species = unique(df.pwms$species), gene = unique(df.pwms$gene)) %>%
+  mutate(species.1 = ifelse(species == "HomoSapiens", "human", "mouse"),
+         gene.1 = tolower(gene)) %>%
+  mutate(file.name = paste0("pools/pwms/", species.1, ".", gene.1, ".aa.aa_cdr3_pwm.txt")) %>%
+  group_by(species, gene) %>%
+  do(fread(.$file.name)) %>%
+  mutate(v.segm.repr = v, j.segm.repr = j, count.bg = value) %>%
+  select(-sample.id, -v, -j, -value) %>%
+  group_by(species, gene, v.segm.repr, j.segm.repr, len) %>%
+  mutate(total.bg = sum(count.bg[which(pos == 0)])) %>%
+  ungroup
+
+# for imputation, to use where we don't have data
+df.bg.pwms.i <- df.bg.pwms %>%
+  group_by(species, gene, len, pos, aa) %>%
+  summarise(count.bg.i = sum(count.bg)) %>%
+  group_by(species, gene, len) %>%
+  mutate(total.bg.i = sum(count.bg.i[which(pos == 0)])) %>%
+  ungroup
+```
+
+Merge with PWMs for VDJdb motifs
+
+```{r}
+df.pwms.info <- df.pwms %>%
+  merge(df.bg.pwms, all.x = T) %>%
+  merge(df.bg.pwms.i, all.x = T) %>%
+  group_by(cid) %>%
+  mutate(need.impute = sum(count.bg[which(pos == 0)], na.rm = T) == 0,
+         count.bg = ifelse(is.na(count.bg), 0, count.bg),
+         count.bg.i = ifelse(is.na(count.bg.i), 0, count.bg.i),
+         total.bg = max(total.bg, na.rm = T),
+         total.bg.i = max(total.bg.i, na.rm = T)) %>%
+  ungroup
+```
+
+Compute frequencies, information and normalized information
+
+```{r}
+df.pwms.info.h <- df.pwms.info %>%
+  group_by(species, antigen.epitope, gene, cid, csz,
+           v.segm.repr, j.segm.repr, pos, len) %>%
+  mutate(freq = count / csz, 
+         freq.bg = ifelse(need.impute, (count.bg.i + 1) / (total.bg.i + 1), (count.bg + 1) / (total.bg + 1)),
+         I = 1 + sum(freq * log(freq)) / log(20),
+         I.norm = -sum(freq * log(freq.bg)) / log(20),
+         height.I = freq * I,
+         height.I.norm = freq * I.norm) %>%
+  ungroup
+
+# some plotting
+df.pwms.info.h %>%
+  select(species, gene, cid, len, pos, I, I.norm) %>%
+  unique %>%
+  melt(measure.vars = c("I", "I.norm")) %>%
+  ggplot(aes(x = pos, y = value, group = paste(cid, variable),
+             color = variable)) +
+  geom_line(alpha = 0.5) +
+  scale_color_brewer(palette = "Set1") +
+  facet_wrap(~len, scales = "free_x") +
+  theme_bw()
+```
+
+Append MHC information
+
+> NB present analysis doesn't consider cases when the same epitope is presented by different MHC
+
+```{r}
+data.frame(cid = df.cc.sel$cid,
+           mhc.a = str_split_fixed(df.cc.sel$mhc.a, "[:,]", 2)[,1],
+           mhc.b = str_split_fixed(df.cc.sel$mhc.b, "[:,]", 2)[,1],
+           mhc.class = df.cc.sel$mhc.class) %>%
+  group_by(cid) %>%
+  summarise(mhc.class = mhc.class[1],
+            mhc.a = most_freq_segm(mhc.a),
+            mhc.b = most_freq_segm(mhc.b)) %>%
+  merge(df.pwms.info.h) %>%
+  fwrite("motif_pwms.txt", sep = "\t")
+```
