@@ -301,7 +301,7 @@ df.pwms.info.h <- df.pwms.info %>%
   mutate(freq = count / csz, 
          freq.bg = ifelse(need.impute, (count.bg.i + 1) / (total.bg.i + 1), (count.bg + 1) / (total.bg + 1)),
          I = 1 + sum(freq * log(freq)) / log(20),
-         I.norm = -sum(freq * log(freq.bg)) / log(20),
+         I.norm = -sum(freq * log(freq.bg)) / log(20) / 2,
          height.I = freq * I,
          height.I.norm = freq * I.norm) %>%
   ungroup
