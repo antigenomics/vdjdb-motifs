@@ -1,7 +1,7 @@
 ---
 title: "Inferring motifs from VDJdb and building motif PWMs"
-author: "M.S."
-date: "12/5/2018"
+author: "M.S. & co"
+date: "20/5/2020"
 output: html_document
 ---
 
@@ -14,6 +14,9 @@ library(stringdist)
 library(reshape2)
 library(igraph)
 library(ggplot2)
+library(ggseqlogo)
+library(parallel)
+select = dplyr::select
 ```
 
 ## Export VDJdb to VDJtools format
@@ -36,10 +39,10 @@ dt.epi.count = df.vdjdb %>%
   summarise(total = n()) %>%
   arrange(-total)
 
-dt.epi.count %>% head(n=10)
+dt.epi.count %>% head(n = 10)
 
 df.vdjdb.good = df.vdjdb %>%
-  merge(dt.epi.count %>% filter(total >= 30))
+  merge(dt.epi.count %>% filter(total >= 10))
 ```
 Back translate mock functions
 
@@ -136,7 +139,7 @@ df.tcrnet <- df.tcrnet %>%
   group_by(species, gene, antigen.epitope) %>%
   mutate(p.adj = p.value.g) %>%
   ungroup %>%
-  mutate(enriched = degree.s >= 3 & p.adj < 0.05)
+  mutate(enriched = degree.s >= 2 & p.adj < 0.05)
 ```
 
 ## Analyze CDR3 graphs
@@ -180,14 +183,23 @@ Select connected componenets/clusters with motifs
 
 ```{r}
 compute_cc <- function(from, to) {
-  cc <- data.frame(from, to) %>%
-    graph_from_data_frame() %>%
-    simplify %>%
+  gg <- data.frame(from, to) %>%
+    graph_from_data_frame %>%
+    simplify
+  
+  cc <- gg %>%
     clusters
   
-  data.frame(cdr3aa = names(cc$membership),
-             cid = cc$membership,
-             stringsAsFactors = F)
+  coords <- gg %>%
+      layout_with_graphopt(niter = 3000, charge = 0.005)
+  
+  data.frame(cdr3aa = names(V(gg)),
+             x = coords[,1],
+             y = coords[,2],
+             stringsAsFactors = F) %>%
+    merge(data.frame(cdr3aa = names(cc$membership),
+                 cid = cc$membership,
+                 stringsAsFactors = F))
 }
 
 df.cc <- df.graph %>%
@@ -225,7 +237,41 @@ Select and write large clusters
 df.cc.sel <- df.cc %>%
   filter(csz >= 5)
 
-fwrite(df.cc.sel, "cluster_members.txt", sep = "\t")
+# append HLA info
+df.mhc.info <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
+  select(species, antigen.epitope, antigen.gene, antigen.species, 
+         mhc.a, mhc.b, mhc.class) %>%
+  group_by(species, antigen.epitope) %>%
+  summarise(antigen.gene = most_freq_segm(antigen.gene),
+            antigen.species = most_freq_segm(antigen.species),
+            mhc.a = most_freq_segm(mhc.a),
+            mhc.b = most_freq_segm(mhc.b),
+            mhc.class = most_freq_segm(mhc.class))
+
+df.mhc.info %>%
+  merge(df.cc.sel) %>%
+  fwrite("cluster_members.txt", sep = "\t")
+```
+
+Plot them
+
+```{r fig.width=8, fig.height=8}
+p1 <- df.cc.sel %>%
+  group_by(species, gene, antigen.epitope) %>%
+  mutate(total = n()) %>%
+  filter(species == "HomoSapiens", gene == "TRB", total >= 50) %>%
+  ggplot(aes(x = x, y = y, color = nchar(cdr3aa)))+#log10(csz / total))) +
+  geom_point(color = "black") +
+  geom_point() +
+  xlab("") + ylab("") +
+  scale_color_distiller(palette = "Spectral", guide = F) +
+  facet_wrap(~ antigen.epitope, scales = "free") +
+  theme_classic() +
+  theme(aspect = 1, axis.text=element_blank())
+p1
+pdf("p1.pdf")
+p1
+dev.off()
 ```
 
 ## Compute position-weight matrices for motifs
@@ -307,16 +353,24 @@ df.pwms.info.h <- df.pwms.info %>%
   ungroup
 
 # some plotting
-df.pwms.info.h %>%
+p2 <- df.pwms.info.h %>%
   select(species, gene, cid, len, pos, I, I.norm) %>%
   unique %>%
+  filter(species == "HomoSapiens", gene == "TRB", len > 10, len < 17) %>%
   melt(measure.vars = c("I", "I.norm")) %>%
   ggplot(aes(x = pos, y = value, group = paste(cid, variable),
              color = variable)) +
-  geom_line(alpha = 0.5) +
-  scale_color_brewer(palette = "Set1") +
+  geom_line(alpha = 0.5) + ylab("") +
+  scale_x_continuous("position in CDR3", breaks = 0:16) +
+  scale_color_brewer("", palette = "Set1") +
   facet_wrap(~len, scales = "free_x") +
-  theme_bw()
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+p2
+pdf("p2.pdf", width = 8, height = 6)
+p2
+dev.off()
 ```
 
 Append MHC information
@@ -324,14 +378,53 @@ Append MHC information
 > NB present analysis doesn't consider cases when the same epitope is presented by different MHC
 
 ```{r}
-data.frame(cid = df.cc.sel$cid,
-           mhc.a = str_split_fixed(df.cc.sel$mhc.a, "[:,]", 2)[,1],
-           mhc.b = str_split_fixed(df.cc.sel$mhc.b, "[:,]", 2)[,1],
-           mhc.class = df.cc.sel$mhc.class) %>%
-  group_by(cid) %>%
-  summarise(mhc.class = mhc.class[1],
-            mhc.a = most_freq_segm(mhc.a),
-            mhc.b = most_freq_segm(mhc.b)) %>%
-  merge(df.pwms.info.h) %>%
+df.pwms.info.h %>%
+  merge(df.mhc.info) %>%
   fwrite("motif_pwms.txt", sep = "\t")
+```
+
+### An example of motif visualization
+
+For B44 NEGVKAAW
+
+```{r}
+p_negvkaaw_clusters <- df.cc.sel %>%
+  filter(antigen.epitope == "NEGVKAAW") %>%
+  ggplot(aes(x = x, y = y, color = cid))+#log10(csz / total))) +
+  geom_density_2d(h=c(200, 200)) +
+  geom_point() +
+  geom_text_repel(aes(label = cdr3aa), 
+                  min.segment.length = 0, segment.alpha = 0.5,
+                  color = "black", cex = 2.5) +
+  xlab("") + ylab("") +
+  scale_color_brewer(palette = "Set1", guide = F) +
+  facet_wrap(~ gene, scales = "free") +
+  theme_classic() +
+  theme(aspect = 1, axis.text=element_blank()) +
+  ggtitle("CDR3 amino acid sequence similarity map") -> p_negvkaaw
+p_negvkaaw_clusters
+```
+```{r fig.height=6, fig.width=10}
+p_negvkaaw_logo <- plot_grid(plotlist = df.cc.sel %>%
+                               filter(antigen.epitope == "NEGVKAAW") %>%
+                               mutate(cid = str_replace(cid, "H\\.", "TR")) %>%
+                               group_by(cid) %>%
+                               group_map(~ggseqlogo(.x$cdr3aa) +
+                                           ggtitle(.y) + 
+                                           theme(legend.position = "none",
+                                                 axis.title.y = element_blank(),
+                                                 axis.text.y = element_blank())),
+                             ncol = 3)
+
+p_negvkaaw_logo
+
+pdf("negvkaaw_motif.pdf", height = 4, width = 9)
+p_negvkaaw_clusters
+p_negvkaaw_logo
+dev.off()
+```
+
+
+```{r}
+#
 ```
