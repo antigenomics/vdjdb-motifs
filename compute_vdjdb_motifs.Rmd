@@ -1,7 +1,7 @@
 ---
 title: "Inferring motifs from VDJdb and building motif PWMs"
 author: "M.S. & co"
-date: "20/5/2020"
+date: "05-09-2021"
 output: html_document
 ---
 
@@ -14,14 +14,16 @@ library(stringdist)
 library(reshape2)
 library(igraph)
 library(ggplot2)
+library(ggrepel)
 library(ggseqlogo)
 library(parallel)
+library(cowplot)
 select = dplyr::select
 ```
 
 ## Export VDJdb to VDJtools format
 
-Load latest DB for human
+Load latest DB for human and mouse
 
 ```{r}
 df.vdjdb = fread("vdjdb_dump/vdjdb.slim.txt") %>%
@@ -31,7 +33,7 @@ df.vdjdb = fread("vdjdb_dump/vdjdb.slim.txt") %>%
   unique
 ```
 
-Select epitopes
+Select epitopes with at least $10$ specific TCR sequences
 
 ```{r}
 dt.epi.count = df.vdjdb %>%
@@ -81,7 +83,7 @@ df.vdjtools <- df.vdjdb.good %>%
          gene, antigen.epitope, species)
 ```
 
-Write separate VDJtools file for each epitope
+Write separate VDJtools-formatted file for each epitope
 
 ```{r}
 system("mkdir vdjdb_export/")
@@ -96,7 +98,7 @@ df.vdjtools %>%
 
 ## Run TCRNET
 
-List VDJdb split files
+List split and formatted files from VDJdb
 
 ```{r}
 filenames <- list.files("vdjdb_export/")
@@ -108,7 +110,7 @@ df.files <- data.frame(file.name = filenames, species = tmp[,1], gene = tmp[,2])
          background = paste0("pools/", species, ".", gene, ".aa.txt"))
 ```
 
-Run TCRNET via vdjtools
+Run TCRNET algorithm via VDJtools JAR
          
 ```{r}
 df.files %>%
@@ -119,7 +121,7 @@ df.files %>%
   do(data.frame(system(.$cmd)))
 ```
 
-Load results
+Load TCRNET results
 
 ```{r}
 df.tcrnet <- filenames %>%
@@ -144,7 +146,7 @@ df.tcrnet <- df.tcrnet %>%
 
 ## Analyze CDR3 graphs
 
-Build hamming graph around enriched CDR3s
+Build hamming graph neighborhood around enriched CDR3s
 
 ```{r}
 compute_edges <- function(cdr3.1, cdr3.2, combine) {
@@ -179,7 +181,7 @@ df.graph <- df.graph.e %>%
   ungroup
 ```
 
-Select connected componenets/clusters with motifs
+Select connected componenets (or "clusters") that represent CDR3 motifs
 
 ```{r}
 compute_cc <- function(from, to) {
@@ -231,7 +233,7 @@ df.cc <- df.cc %>%
   ungroup
 ```
 
-Select and write large clusters
+Select and write clusters with at least 5 members
 
 ```{r}
 df.cc.sel <- df.cc %>%
@@ -246,32 +248,46 @@ df.mhc.info <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
             antigen.species = most_freq_segm(antigen.species),
             mhc.a = most_freq_segm(mhc.a),
             mhc.b = most_freq_segm(mhc.b),
-            mhc.class = most_freq_segm(mhc.class))
+            mhc.class = most_freq_segm(mhc.class)) %>%
+  ungroup
 
 df.mhc.info %>%
   merge(df.cc.sel) %>%
   fwrite("cluster_members.txt", sep = "\t")
 ```
 
-Plot them
+Plot epitopes with at least 30 sequences combined in clusters for human
 
 ```{r fig.width=8, fig.height=8}
 p1 <- df.cc.sel %>%
   group_by(species, gene, antigen.epitope) %>%
   mutate(total = n()) %>%
-  filter(species == "HomoSapiens", gene == "TRB", total >= 50) %>%
-  ggplot(aes(x = x, y = y, color = nchar(cdr3aa)))+#log10(csz / total))) +
+  filter(antigen.epitope != "KLGGALQAK", species == "HomoSapiens", gene == "TRA", total >= 30) %>%
+  ggplot(aes(x = x, y = y, color = nchar(cdr3aa))) +
   geom_point(color = "black") +
   geom_point() +
   xlab("") + ylab("") +
   scale_color_distiller(palette = "Spectral", guide = F) +
-  facet_wrap(~ antigen.epitope, scales = "free") +
-  theme_classic() +
+  facet_wrap(~ antigen.epitope, scales = "free", ncol = 3) +
+  ggtitle("TRA, epitopes w/ 30+ sequences, colored by CDR3len") +
+  theme_minimal() +
   theme(aspect = 1, axis.text=element_blank())
 p1
-pdf("p1.pdf")
-p1
-dev.off()
+
+p2 <- df.cc.sel %>%
+  group_by(species, gene, antigen.epitope) %>%
+  mutate(total = n()) %>%
+  filter(antigen.epitope != "KLGGALQAK", species == "HomoSapiens", gene == "TRB", total >= 30) %>%
+  ggplot(aes(x = x, y = y, color = nchar(cdr3aa))) +
+  geom_point(color = "black") +
+  geom_point() +
+  xlab("") + ylab("") +
+  scale_color_distiller(palette = "Spectral", guide = F) +
+  facet_wrap(~ antigen.epitope, scales = "free", ncol = 3) +
+  ggtitle("TRB, epitopes w/ 30+ sequences, colored by CDR3len") +
+  theme_minimal() +
+  theme(aspect = 1, axis.text=element_blank())
+p2
 ```
 
 ## Compute position-weight matrices for motifs
@@ -284,7 +300,9 @@ df.flataa <- df.cc.sel %>%
   unique %>%
   strsplit("") %>%
   mclapply(function(x) data.frame(cdr3aa = paste0(x, collapse = ""), 
-                                  aa = x, stringsAsFactors = F) %>% mutate(pos = 0:(n()-1)), mc.cores = 80) %>%
+                                  aa = x, stringsAsFactors = F) %>%
+             mutate(pos = 0:(n()-1)),
+           mc.cores = 80) %>%
   rbindlist
 ```
 
@@ -296,7 +314,8 @@ df.pwms <- df.cc.sel %>%
   mutate(len = nchar(cdr3aa)) %>%
   group_by(species, gene, antigen.epitope,
            v.segm.repr, j.segm.repr, cid, csz, aa, pos, len) %>%
-  summarise(count = n())
+  summarise(count = n()) %>%
+  ungroup
 ```
 
 Load background PWMs for normalization
@@ -329,6 +348,7 @@ Merge with PWMs for VDJdb motifs
 df.pwms.info <- df.pwms %>%
   merge(df.bg.pwms, all.x = T) %>%
   merge(df.bg.pwms.i, all.x = T) %>%
+  filter(total.bg > 0) %>%
   group_by(cid) %>%
   mutate(need.impute = sum(count.bg[which(pos == 0)], na.rm = T) == 0,
          count.bg = ifelse(is.na(count.bg), 0, count.bg),
@@ -340,12 +360,14 @@ df.pwms.info <- df.pwms %>%
 
 Compute frequencies, information and normalized information
 
-```{r}
+```{r fig.width=8, fig.height=6}
 df.pwms.info.h <- df.pwms.info %>%
   group_by(species, antigen.epitope, gene, cid, csz,
            v.segm.repr, j.segm.repr, pos, len) %>%
   mutate(freq = count / csz, 
-         freq.bg = ifelse(need.impute, (count.bg.i + 1) / (total.bg.i + 1), (count.bg + 1) / (total.bg + 1)),
+         freq.bg = ifelse(need.impute,
+                          (count.bg.i + 1) / (total.bg.i + 1),
+                          (count.bg + 1) / (total.bg + 1)),
          I = 1 + sum(freq * log(freq)) / log(20),
          I.norm = -sum(freq * log(freq.bg)) / log(20) / 2,
          height.I = freq * I,
@@ -353,7 +375,23 @@ df.pwms.info.h <- df.pwms.info %>%
   ungroup
 
 # some plotting
-p2 <- df.pwms.info.h %>%
+p3 <- df.pwms.info.h %>%
+  select(species, gene, cid, len, pos, I, I.norm) %>%
+  unique %>%
+  filter(species == "HomoSapiens", gene == "TRA", len > 10, len < 17) %>%
+  melt(measure.vars = c("I", "I.norm")) %>%
+  ggplot(aes(x = pos, y = value, group = paste(cid, variable),
+             color = variable)) +
+  geom_line(alpha = 0.5) + ylab("") +
+  scale_x_continuous("position in CDR3", breaks = 0:16) +
+  scale_color_brewer("", palette = "Set1") +
+  facet_wrap(~len, scales = "free_x") +
+  ggtitle("PWM information for TRA, CDR3 length in [11, 16]") +
+  theme_classic() +
+  theme(legend.position = "bottom")
+p3
+
+p4 <- df.pwms.info.h %>%
   select(species, gene, cid, len, pos, I, I.norm) %>%
   unique %>%
   filter(species == "HomoSapiens", gene == "TRB", len > 10, len < 17) %>%
@@ -364,13 +402,10 @@ p2 <- df.pwms.info.h %>%
   scale_x_continuous("position in CDR3", breaks = 0:16) +
   scale_color_brewer("", palette = "Set1") +
   facet_wrap(~len, scales = "free_x") +
+  ggtitle("PWM information for TRB, CDR3 length in [11, 16]") +
   theme_classic() +
   theme(legend.position = "bottom")
-
-p2
-pdf("p2.pdf", width = 8, height = 6)
-p2
-dev.off()
+p4
 ```
 
 Append MHC information
@@ -385,28 +420,36 @@ df.pwms.info.h %>%
 
 ### An example of motif visualization
 
-For B44 NEGVKAAW
+For A*02 YLQ. TCR similarity map
 
-```{r}
-p_negvkaaw_clusters <- df.cc.sel %>%
-  filter(antigen.epitope == "NEGVKAAW") %>%
-  ggplot(aes(x = x, y = y, color = cid))+#log10(csz / total))) +
-  geom_density_2d(h=c(200, 200)) +
-  geom_point() +
-  geom_text_repel(aes(label = cdr3aa), 
-                  min.segment.length = 0, segment.alpha = 0.5,
-                  color = "black", cex = 2.5) +
+```{r fig.height=6, fig.width=8}
+p5 <- df.cc.sel %>%
+  filter(antigen.epitope == "YLQPRTFLL") %>%
+  ggplot(aes(x = x, y = y)) +
+  geom_density_2d_filled(color = "black", contour = F) +
+  geom_point(aes(color = cid)) +
+  #geom_text_repel(aes(label = cdr3aa), 
+  #                min.segment.length = 0, segment.alpha = 0.5,
+  #                color = "black", cex = 2.5) +
   xlab("") + ylab("") +
-  scale_color_brewer(palette = "Set1", guide = F) +
-  facet_wrap(~ gene, scales = "free") +
-  theme_classic() +
-  theme(aspect = 1, axis.text=element_blank()) +
-  ggtitle("CDR3 amino acid sequence similarity map") -> p_negvkaaw
-p_negvkaaw_clusters
+  scale_color_discrete("CID") +
+  #scale_color_brewer(palette = "Paired", guide = F) +
+  scale_fill_brewer(guide=F, palette = "Greys") +
+  facet_wrap( ~ gene, scales = "free") +
+  ggtitle("CDR3 amino acid sequence similarity map for A*02 YLQ") +
+  theme_minimal() +
+  theme(aspect = 1,
+        axis.text = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) 
+
+p5
 ```
-```{r fig.height=6, fig.width=10}
-p_negvkaaw_logo <- plot_grid(plotlist = df.cc.sel %>%
-                               filter(antigen.epitope == "NEGVKAAW") %>%
+and motif PWMs
+
+```{r fig.height=6, fig.width=8}
+p6 <- plot_grid(plotlist = df.cc.sel %>%
+                               filter(antigen.epitope == "YLQPRTFLL") %>%
                                mutate(cid = str_replace(cid, "H\\.", "TR")) %>%
                                group_by(cid) %>%
                                group_map(~ggseqlogo(.x$cdr3aa) +
@@ -416,14 +459,94 @@ p_negvkaaw_logo <- plot_grid(plotlist = df.cc.sel %>%
                                                  axis.text.y = element_blank())),
                              ncol = 3)
 
-p_negvkaaw_logo
+p6
+```
 
-pdf("negvkaaw_motif.pdf", height = 4, width = 9)
-p_negvkaaw_clusters
-p_negvkaaw_logo
+### For COVID-19 whitepaper
+
+```{r fig.height=6, fig.width=8}
+df.cc.sel.cov <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
+  filter(antigen.species == "SARS-CoV-2") %>%
+  mutate(cdr3aa = cdr3) %>%
+  select(cdr3aa, antigen.epitope, reference.id) %>%
+  mutate(study = ifelse(grepl(",", reference.id, fixed = T), "multi", reference.id)) %>%
+  select(-reference.id) %>%
+  merge(df.cc.sel) %>%
+  merge(
+    data.frame(study = c(
+      "PMID:33664060",
+      "https://github.com/antigenomics/vdjdb-db/issues/326",
+      "https://github.com/antigenomics/vdjdb-db/issues/315",
+      "https://github.com/antigenomics/vdjdb-db/issues/323",
+      "PMID:33951417",
+      "multi",
+      "PMID:34086357"),
+      study.name = c(
+        "Agerer et al (2021)", 
+        "Thomas lab (2021)",
+        "Efimov lab (2020)",
+        "Sewell lab (2021)",
+        "Nguyen et al (2021)",
+        "Multi-lab",
+        "Rowntree et al (2021)"),
+      stringsAsFactors=F),
+    by = "study"
+  )
+
+
+p7 <- df.cc.sel.cov %>%
+  filter(antigen.epitope == "YLQPRTFLL", study != "multi") %>%
+  ggplot(aes(x = x, y = y)) +
+  #geom_density_2d_filled(color = "white") +
+  geom_density_2d(color = "grey") +
+  geom_point(color = "white", size = 2) +
+  geom_point(aes(color = study.name), size = 1.5) +
+  geom_point(data = df.cc.sel.cov %>%
+               filter(antigen.epitope == "YLQPRTFLL", study == "multi"),
+             color = "white", size = 3) +
+  geom_point(data = df.cc.sel.cov %>%
+               filter(antigen.epitope == "YLQPRTFLL", study == "multi"),
+             color = "black", size = 2.5) +
+  #geom_text_repel(aes(label = cdr3aa), 
+  #                min.segment.length = 0, segment.alpha = 0.5,
+  #                color = "black", cex = 2.5) +
+  xlab("") + ylab("") +
+  scale_color_brewer("", palette = "Set1") +
+  scale_fill_brewer(guide=F, palette = "Greys") +
+  facet_wrap( ~ gene, scales = "free") +
+  theme_minimal() +
+  theme(aspect = 1,
+        legend.position = "bottom",
+        axis.text = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) 
+
+p7
+
+pdf("fig2a.pdf", width = 8, height = 6)
+p7
 dev.off()
 ```
 
+```{r fig.height=6, fig.width=8}
+p8 <- plot_grid(plotlist = df.cc.sel.cov %>%
+                  filter(gene == "TRB", antigen.epitope == "YLQPRTFLL") %>%
+                  group_by(study.name, cid) %>%
+                  filter(n() >= 10) %>%
+                  group_map(~ggseqlogo(.x$cdr3aa) +
+                              ggtitle(.y) + 
+                              theme(legend.position = "none",
+                                    axis.title.y = element_blank(),
+                                    axis.text.y = element_blank())),
+                ncol = 3)
+p8
+
+pdf("fig2b.pdf", width = 8, height = 6)
+p8
+dev.off()
+```
+
+###
 
 ```{r}
 #
