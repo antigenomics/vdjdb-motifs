@@ -2,7 +2,9 @@
 title: "Inferring motifs from VDJdb and building motif PWMs"
 author: "M.S. & co"
 date: "05-09-2021"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -469,7 +471,9 @@ df.cc.sel.cov <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
   filter(antigen.species == "SARS-CoV-2") %>%
   mutate(cdr3aa = cdr3) %>%
   select(cdr3aa, antigen.epitope, reference.id) %>%
-  mutate(study = ifelse(grepl(",", reference.id, fixed = T), "multi", reference.id)) %>%
+  mutate(study = ifelse(grepl(",", reference.id, fixed = T), 
+                        ifelse(grepl("215", reference.id), "multi-structure", "multi"), 
+                        ifelse(grepl("215", reference.id), "structure", reference.id))) %>%
   select(-reference.id) %>%
   merge(df.cc.sel) %>%
   merge(
@@ -479,39 +483,51 @@ df.cc.sel.cov <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
       "https://github.com/antigenomics/vdjdb-db/issues/315",
       "https://github.com/antigenomics/vdjdb-db/issues/323",
       "PMID:33951417",
+      "PMID:34086357",
+      "structure",
       "multi",
-      "PMID:34086357"),
+      "multi-structure"),
       study.name = c(
         "Agerer et al (2021)", 
         "Thomas lab (2021)",
         "Efimov lab (2020)",
         "Sewell lab (2021)",
-        "Nguyen et al (2021)",
+        "Kedzierska lab (2021)",
+        "Rowntree et al (2021)",
+        "Structure",
         "Multi-lab",
-        "Rowntree et al (2021)"),
+        "Multi-lab-structure"),
       stringsAsFactors=F),
     by = "study"
   )
 
 
 p7 <- df.cc.sel.cov %>%
-  filter(antigen.epitope == "YLQPRTFLL", study != "multi") %>%
+  filter(antigen.epitope == "YLQPRTFLL", 
+         !(study %in% c("PMID:33664060", "multi", "structure", "multi-structure"))) %>%
   ggplot(aes(x = x, y = y)) +
   #geom_density_2d_filled(color = "white") +
   geom_density_2d(color = "grey") +
   geom_point(color = "white", size = 2) +
   geom_point(aes(color = study.name), size = 1.5) +
   geom_point(data = df.cc.sel.cov %>%
-               filter(antigen.epitope == "YLQPRTFLL", study == "multi"),
+               filter(antigen.epitope == "YLQPRTFLL", startsWith(study, "multi")),
              color = "white", size = 3) +
   geom_point(data = df.cc.sel.cov %>%
-               filter(antigen.epitope == "YLQPRTFLL", study == "multi"),
-             color = "black", size = 2.5) +
-  #geom_text_repel(aes(label = cdr3aa), 
-  #                min.segment.length = 0, segment.alpha = 0.5,
-  #                color = "black", cex = 2.5) +
+               filter(antigen.epitope == "YLQPRTFLL", startsWith(study, "multi")),
+             color = "red", size = 2.5) +
+  geom_label_repel(data = df.cc.sel.cov %>%
+                    filter(antigen.epitope == "YLQPRTFLL", endsWith(study, "structure")),
+                  aes(label = cdr3aa),
+                  min.segment.length = 0, 
+                  nudge_x = 200,
+                  nudge_y = 200,
+                  alpha = 0.9,
+                  color = "black",
+                  arrow = arrow(length = unit(0.05, "inches"), 
+                                type = "closed")) +
   xlab("") + ylab("") +
-  scale_color_brewer("", palette = "Set1") +
+  scale_color_brewer("", palette = "Set2") +
   scale_fill_brewer(guide=F, palette = "Greys") +
   facet_wrap( ~ gene, scales = "free") +
   theme_minimal() +
@@ -528,8 +544,24 @@ p7
 dev.off()
 ```
 
-```{r fig.height=6, fig.width=8}
+```{r fig.height=3.5, fig.width=8}
 p8 <- plot_grid(plotlist = df.cc.sel.cov %>%
+                  filter(gene == "TRA", antigen.epitope == "YLQPRTFLL") %>%
+                  group_by(study.name, cid) %>%
+                  filter(n() >= 10) %>%
+                  group_map(~ggseqlogo(.x$cdr3aa) +
+                              ggtitle(.y) + 
+                              theme(legend.position = "none",
+                                    axis.title.y = element_blank(),
+                                    axis.text.y = element_blank())),
+                ncol = 4)
+p8
+
+pdf("fig2b.pdf", width = 8, height = 3.5)
+p8
+dev.off()
+
+p9 <- plot_grid(plotlist = df.cc.sel.cov %>%
                   filter(gene == "TRB", antigen.epitope == "YLQPRTFLL") %>%
                   group_by(study.name, cid) %>%
                   filter(n() >= 10) %>%
@@ -538,11 +570,11 @@ p8 <- plot_grid(plotlist = df.cc.sel.cov %>%
                               theme(legend.position = "none",
                                     axis.title.y = element_blank(),
                                     axis.text.y = element_blank())),
-                ncol = 3)
-p8
+                ncol = 4)
+p9
 
-pdf("fig2b.pdf", width = 8, height = 6)
-p8
+pdf("fig2c.pdf", width = 8, height = 3.5)
+p9
 dev.off()
 ```
 
