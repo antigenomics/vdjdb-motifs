@@ -3,4 +3,4 @@ tcrnet/
 vdjdb_dump/
 vdjdb_export/
 pools.zip
-*.pdf
+/*.pdf
