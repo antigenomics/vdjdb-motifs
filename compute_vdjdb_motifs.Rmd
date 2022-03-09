@@ -1,10 +1,9 @@
 ---
 title: "Inferring motifs from VDJdb and building motif PWMs"
-author: "M.S. & co"
-date: "05-09-2021"
+author: "Mikhail Shugay"
+date: "09-03-2022"
 output:
   pdf_document: default
-  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -21,6 +20,25 @@ library(ggseqlogo)
 library(parallel)
 library(cowplot)
 select = dplyr::select
+
+VDJTOOLS_PATH = "/software/bin/vdjtools"
+VDJDB_SLIM_PATH = "vdjdb_dump/vdjdb.slim.txt"
+POOLS_PATH = "pools/"
+```
+
+```{r}
+if (!file.exists(VDJTOOLS_PATH)) {
+  stop(paste("VDJtools binary not found at", VDJTOOLS_PATH))
+}
+
+if (!file.exists(VDJDB_SLIM_PATH)) {
+  stop(paste("VDJdb database not found at", VDJDB_SLIM_PATH))
+}
+
+if (!dir.exists(POOLS_PATH)) {
+  system("wget https://zenodo.org/record/6339774/files/pools.zip")
+  system("unzip pools.zip")
+}
 ```
 
 ## Export VDJdb to VDJtools format
@@ -28,7 +46,7 @@ select = dplyr::select
 Load latest DB for human and mouse
 
 ```{r}
-df.vdjdb = fread("vdjdb_dump/vdjdb.slim.txt") %>%
+df.vdjdb = fread(VDJDB_SLIM_PATH) %>%
   filter(species %in% c("HomoSapiens", "MusMusculus"),
          v.segm != "", j.segm != "", !is.na(j.segm)) %>%
   select(cdr3, v.segm, j.segm, v.end, j.start, antigen.epitope, gene, species) %>%
@@ -117,7 +135,7 @@ Run TCRNET algorithm via VDJtools JAR
 ```{r}
 df.files %>%
   group_by(background) %>%
-  summarise(cmd = paste0("/software/bin/vdjtools -Xmx100G CalcDegreeStats -o 1,0,1 -g2 dummy -b ",
+  summarise(cmd = paste0(VDJTOOLS_PATH, " -Xmx100G CalcDegreeStats -o 1,0,1 -g2 dummy -b ",
          background[1], " ", paste(input, collapse = " "), " tcrnet/")) %>%
   group_by(background) %>%
   do(data.frame(system(.$cmd)))
@@ -242,7 +260,7 @@ df.cc.sel <- df.cc %>%
   filter(csz >= 5)
 
 # append HLA info
-df.mhc.info <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
+df.mhc.info <- fread(VDJDB_SLIM_PATH) %>%
   select(species, antigen.epitope, antigen.gene, antigen.species, 
          mhc.a, mhc.b, mhc.class) %>%
   group_by(species, antigen.epitope) %>%
@@ -467,7 +485,7 @@ p6
 ### For COVID-19 whitepaper
 
 ```{r fig.height=6, fig.width=8}
-df.cc.sel.cov <- fread("vdjdb_dump/vdjdb.slim.txt") %>%
+df.cc.sel.cov <- fread(VDJDB_SLIM_PATH) %>%
   filter(antigen.species == "SARS-CoV-2") %>%
   mutate(cdr3aa = cdr3) %>%
   select(cdr3aa, antigen.epitope, reference.id) %>%
