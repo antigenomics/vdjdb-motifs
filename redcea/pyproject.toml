@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vdjdb-redcea"
+version = "0.1.0"
+description = "VDJdb per-epitope clustering wrapper built on top of tcremp"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+  { name = "vek239", email = "elizaveta.k.vlasova@gmail.com" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Operating System :: OS Independent"
+]
+keywords = ["vdjdb", "tcr", "clustering", "immunoinformatics"]
+requires-python = ">=3.10"
+dependencies = [
+  "faiss-cpu>=1.7.4",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "plotly>=5.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/antigenomics/vdjdb_redcea"
+Repository = "https://github.com/antigenomics/vdjdb_redcea"
+
+[project.scripts]
+vdjdb-redcea = "vdjdb_redcea.vdjdb_epitope_clustering:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]

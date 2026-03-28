@@ -1,5 +1,102 @@
-## VDJdb motif inference scripts
+# VDJdb Motif Clustering
 
-One should clone [vdjdb-db repo](https://github.com/antigenomics/vdjdb-db) and [this repo](https://github.com/antigenomics/vdjdb-motifs) to the same directory, say ``~/vcs/`` and then navigate to ``~/vcs/vdjdb-db`` and run ``bash release.sh`` which will build the VDJdb database, navigate to motifs repository and run motif inference.
+This repository now keeps two clustering pipelines side by side:
 
-This folder lacks ``pools/`` directory with control TCR sequences that is ~500Mb compressed, it will be automatically downloaded from this [Zenodo record](https://zenodo.org/record/6339774) when running ``compute_vdjdb_motifs.Rmd`` or ``release.sh``.
+- `tcrnet/`: the R Markdown workflow based on VDJtools/TCRNET
+- `redcea/`: the new Python package based on TCRemP + REDCEA-style shared-background clustering
+
+The goal is to keep the TCRNET pipeline runnable as before while letting the new implementation evolve independently.
+
+## Repository Layout
+
+```text
+vdjdb-motifs/
+  tcrnet/   TCRNET clustering workflow
+  redcea/   installable Python package
+  results/  generated tabular outputs
+  figures/  generated PDF figures
+  scripts/  run and setup helpers
+```
+
+## Simple Commands
+
+If you just want one command per pipeline:
+
+```bash
+./scripts/run_tcrnet.sh
+./scripts/run_redcea.sh
+```
+
+`run_redcea.sh` launches `TRA` and `TRB` in parallel.
+
+Before the first run:
+
+TCRNET:
+```bash
+Rscript scripts/install_tcrnet_deps.R
+./scripts/fetch_tcrnet_backgrounds.sh
+```
+
+REDCEA:
+```bash
+./scripts/install_redcea.sh
+./scripts/fetch_redcea_backgrounds.sh
+```
+
+## Background Data
+
+- `tcrnet` backgrounds are public and downloaded automatically from Zenodo by `scripts/fetch_tcrnet_backgrounds.sh`.
+- `redcea` needs two prepared background files:
+  - AIRR repertoire table
+  - embedding parquet file
+- The repository now includes a downloader script for `redcea`.
+- By default it downloads `https://zenodo.org/record/6339774/files/redcea_bg.gz`.
+- You can still pass a different Zenodo archive URL as the first argument if needed.
+- `scripts/install_redcea.sh` creates a separate conda environment, installs `tcremp` from `https://github.com/antigenomics/tcremp.git`, and then installs this repository's `redcea` package into that environment.
+
+## REDCEA Zenodo Files
+
+If you want `redcea` to start quickly from downloaded assets, the default Zenodo bundle is:
+
+- `https://zenodo.org/record/6339774/files/redcea_bg.gz`
+
+Required per chain:
+- `tra_background_100k.tsv`
+- `tra_background_100k_embeddings.parquet`
+- `trb_background_100k.tsv`
+- `trb_background_100k_embeddings.parquet`
+
+Optional but useful per chain:
+- `tra_background_transform.joblib`
+- `tra_background_transform_bg_umap_99896.npy`
+- `trb_background_transform.joblib`
+- `trb_background_transform_bg_umap_100000.npy`
+
+What these do:
+- `*_background_100k.tsv` is the actual background repertoire input passed to `--background-airr`.
+- `*_background_100k_embeddings.parquet` is the precomputed background embedding input passed to `--background-embedding` after renaming during install.
+- `<chain>_background_transform.joblib` avoids refitting the background PCA/UMAP transform on first run.
+- `<chain>_background_transform_bg_umap_<N>.npy` avoids recomputing the background UMAP cache for plotting for a specific `--n-bg-points` value.
+
+Important path rule:
+- these two optional cache files are only picked up automatically if they are placed inside the exact run output directory, for example `results/redcea/tcremp/trb_background_transform.joblib`
+
+What you do not need to upload:
+- per-epitope sample embeddings
+- per-run cluster tables
+- HTML visualizations
+- `cluster_members_*.txt`
+
+Practical recommendation:
+- if you run both `TRA` and `TRB`, prepare separate Zenodo assets for each chain
+- if you want one fast default path, standardize on one `N` for `--n-bg-points` and upload the matching cached UMAP file too
+- `./scripts/run_redcea.sh` uses the default local paths above directly
+
+## Notes
+
+- TCRNET outputs now go to `results/tcrnet/` and keep the standard names `cluster_members.txt` and `motif_pwms.txt`.
+- TCRNET PDF figures go to the repository-level `figures/` directory.
+- REDCEA writes both chains into `results/redcea/`.
+- REDCEA HTML visualizations are collected in `results/redcea/viz/`.
+- REDCEA `cluster_members_TRA.txt` and `cluster_members_TRB.txt` are written directly into `results/redcea/`.
+- REDCEA uses `redcea/data/vdjdb_full.txt` as the default bundled VDJdb input table.
