@@ -23,25 +23,26 @@ vdjdb-motifs/
 If you just want one command per pipeline:
 
 ```bash
+./scripts/setup.sh tcrnet
 ./scripts/run_tcrnet.sh
+
+./scripts/setup.sh redcea
 ./scripts/run_redcea.sh
 ```
 
 `run_redcea.sh` launches `TRA` and `TRB` in parallel.
 
-Before the first run:
+If you want to prepare everything in one go:
 
-TCRNET:
 ```bash
-Rscript scripts/install_tcrnet_deps.R
-./scripts/fetch_tcrnet_backgrounds.sh
+./scripts/setup.sh all
 ```
 
-REDCEA:
-```bash
-./scripts/install_redcea.sh
-./scripts/fetch_redcea_backgrounds.sh
-```
+Assumptions:
+
+- `tcrnet/vdjdb_dump/vdjdb.slim.txt` already exists before running either pipeline.
+- `VDJtools` is already installed and available to TCRNET.
+- the repository is run in a Unix-like environment.
 
 ## Background Data
 
@@ -52,6 +53,7 @@ REDCEA:
 - The repository now includes a downloader script for `redcea`.
 - By default it downloads `https://zenodo.org/record/6339774/files/redcea_bg.gz`.
 - You can still pass a different Zenodo archive URL as the first argument if needed.
+- `scripts/setup.sh redcea <url>` passes that URL through to the REDCEA background fetch step.
 - `scripts/install_redcea.sh` creates a separate conda environment, installs `tcremp` from `https://github.com/antigenomics/tcremp.git`, and then installs this repository's `redcea` package into that environment.
 
 ## REDCEA Zenodo Files
@@ -99,4 +101,4 @@ Practical recommendation:
 - REDCEA writes both chains into `results/redcea/`.
 - REDCEA HTML visualizations are collected in `results/redcea/viz/`.
 - REDCEA `cluster_members_TRA.txt` and `cluster_members_TRB.txt` are written directly into `results/redcea/`.
-- REDCEA uses `redcea/data/vdjdb_full.txt` as the default bundled VDJdb input table.
+- REDCEA uses `tcrnet/vdjdb_dump/vdjdb.slim.txt` as the default VDJdb input table.

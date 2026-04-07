@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
 URL="${1:-https://zenodo.org/record/6339774/files/redcea_bg.gz}"
 OUTPUT_DIR="redcea/data/backgrounds"
 ARCHIVE_PATH="$OUTPUT_DIR/$(basename "$URL")"

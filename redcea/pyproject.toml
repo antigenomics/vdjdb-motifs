@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "vdjdb-redcea"
 version = "0.1.0"
 description = "VDJdb per-epitope clustering wrapper built on top of tcremp"
-readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 authors = [
   { name = "vek239", email = "elizaveta.k.vlasova@gmail.com" }

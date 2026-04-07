@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
 URL="https://zenodo.org/record/6339774/files/pools.zip"
 OUTPUT_DIR="tcrnet"
 
