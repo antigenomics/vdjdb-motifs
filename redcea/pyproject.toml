@@ -26,10 +26,6 @@ dependencies = [
   "plotly>=5.0"
 ]
 
-[project.urls]
-Homepage = "https://github.com/antigenomics/vdjdb_redcea"
-Repository = "https://github.com/antigenomics/vdjdb_redcea"
-
 [project.scripts]
 vdjdb-redcea = "vdjdb_redcea.vdjdb_epitope_clustering:main"
 

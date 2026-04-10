@@ -121,52 +121,6 @@ def load_or_fit_background_transform(*, args, output_root: Path, bg_emb: pd.Data
     return transform, transform_path
 
 
-def prepare_background_umap(
-    transform: BackgroundTransform,
-    bg_pca: np.ndarray,
-    n_bg_points: int,
-    *,
-    transform_path: Path,
-) -> np.ndarray:
-    """Prepare background UMAP coordinates, using cache if available.
-
-    Args:
-        transform: BackgroundTransform object.
-        bg_pca: Background PCA array.
-        n_bg_points: Number of background points to use.
-        transform_path: Path to the transform file.
-
-    Returns:
-        Background UMAP array.
-    """
-    bg_pca_subset = np.asarray(bg_pca[:n_bg_points], dtype=np.float32)
-    if bg_pca_subset.size == 0:
-        raise ValueError("Cannot prepare background UMAP for empty background PCA array")
-
-    cache_path = get_background_umap_cache_path(transform_path=transform_path, n_bg_points=len(bg_pca_subset))
-    if cache_path.exists():
-        logging.info("Loading cached background UMAP from %s", cache_path)
-        return np.load(cache_path).astype(np.float32, copy=False)
-
-    if transform.umap_model is None:
-        logging.info("Fitting UMAP for plotting on first %d background clonotypes", len(bg_pca_subset))
-        bg_umap = transform.fit_umap(bg_pca_subset)
-        transform.save(transform_path)
-        logging.info("Saved background transform with fitted UMAP to %s", transform_path)
-    elif transform.background_umap_ is not None and len(transform.background_umap_) >= len(bg_pca_subset):
-        bg_umap = np.asarray(transform.background_umap_[: len(bg_pca_subset)], dtype=np.float32)
-    else:
-        logging.info(
-            "Using existing UMAP model to transform first %d background clonotypes for plotting",
-            len(bg_pca_subset),
-        )
-        bg_umap = transform.transform_umap(bg_pca_subset)
-
-    np.save(cache_path, np.asarray(bg_umap, dtype=np.float32))
-    logging.info("Saved cached background UMAP to %s", cache_path)
-    return np.asarray(bg_umap, dtype=np.float32)
-
-
 def fit_joint_umap(
     transform: BackgroundTransform,
     bg_pca: np.ndarray,
