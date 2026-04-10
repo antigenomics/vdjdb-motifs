@@ -69,7 +69,7 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
     parser.add_argument("--nproc", type=int, default=1, help="Number of worker threads/processes.")
     parser.set_defaults(
         prefix=None,
-        metrics="tcremp",
+        metrics="dissimilarity",
         sample=None,
         sample_embedding=None,
         background_embedding=None,
