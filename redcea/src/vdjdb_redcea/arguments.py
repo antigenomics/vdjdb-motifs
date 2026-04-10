@@ -70,6 +70,7 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
     parser.set_defaults(
         prefix=None,
         metrics="tcremp",
+        sample=None,
         sample_embedding=None,
         background_embedding=None,
         n_clonotypes=None,
