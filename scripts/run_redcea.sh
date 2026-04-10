@@ -8,6 +8,7 @@ REDCEA_VDJDB="${REDCEA_VDJDB:-tcrnet/vdjdb_dump/vdjdb.slim.txt}"
 REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
 REDCEA_NPROC="${REDCEA_NPROC:-8}"
 REDCEA_CONDA_ENV="${REDCEA_CONDA_ENV:-vdjdb-redcea}"
+REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-100}"
 
 TRA_BG_AIRR="${TRA_BG_AIRR:-redcea/data/backgrounds/tra_background_100k.tsv}"
 TRA_BG_EMBEDDING="${TRA_BG_EMBEDDING:-redcea/data/backgrounds/tra_background_embeddings.parquet}"
@@ -44,6 +45,7 @@ run_chain() {
     --output "$output_dir" \
     --chain "$chain" \
     --species "$REDCEA_SPECIES" \
+    --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
     --nproc "$REDCEA_NPROC"
 }
 
