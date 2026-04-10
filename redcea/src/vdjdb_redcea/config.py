@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 CHAIN_COLS = {
-    "TRA": {"cdr3": "cdr3.alpha", "v": "v.alpha", "j": "j.alpha", "locus": "alpha", "gene": "alpha"},
-    "TRB": {"cdr3": "cdr3.beta", "v": "v.beta", "j": "j.beta", "locus": "beta", "gene": "beta"},
+    "TRA": {"cdr3": "cdr3", "v": "v.segm", "j": "j.segm", "locus": "alpha", "gene": "alpha"},
+    "TRB": {"cdr3": "cdr3", "v": "v.segm", "j": "j.segm", "locus": "beta", "gene": "beta"},
 }
 
 DEFAULT_PLOT_BG_POINTS = 100_000

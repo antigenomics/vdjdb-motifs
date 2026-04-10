@@ -22,6 +22,42 @@ class EpitopeClusteringArtifacts:
     enriched_sample_cluster_df: pd.DataFrame
 
 
+def _normalize_vdjdb_columns(vdjdb_df: pd.DataFrame, chain: str) -> pd.DataFrame:
+    """Normalize VDJdb inputs to generic per-chain columns.
+
+    After selecting the requested chain, the rest of the pipeline works only
+    with ``cdr3``/``v.segm``/``j.segm`` regardless of whether the source table
+    was a slim export or a full VDJdb dump.
+    """
+    normalized = vdjdb_df.copy()
+
+    if "gene" in normalized.columns:
+        before_gene_filter = len(normalized)
+        normalized = normalized[normalized["gene"].astype(str).str.upper() == chain].copy()
+        logging.info(
+            "Filtered generic VDJdb table by gene=%s: %d -> %d",
+            chain,
+            before_gene_filter,
+            len(normalized),
+        )
+
+    generic_targets = {
+        "cdr3": {"TRA": "cdr3.alpha", "TRB": "cdr3.beta"}[chain],
+        "v.segm": {"TRA": "v.alpha", "TRB": "v.beta"}[chain],
+        "j.segm": {"TRA": "j.alpha", "TRB": "j.beta"}[chain],
+    }
+    renamed_cols = {}
+    for target_col, source_col in generic_targets.items():
+        if target_col not in normalized.columns and source_col in normalized.columns:
+            renamed_cols[source_col] = target_col
+
+    if renamed_cols:
+        normalized = normalized.rename(columns=renamed_cols)
+        logging.info("Renamed VDJdb columns to generic names for %s chain: %s", chain, renamed_cols)
+
+    return normalized
+
+
 def resolve_joint_knn(
     sample_pca: np.ndarray,
     bg_pca: np.ndarray,
@@ -576,6 +612,7 @@ def main():
         lib = SegmentLibrary.load_default(genes=genes, organisms=args.species)
 
         vdjdb_df = pd.read_csv(args.vdjdb, sep="\t")
+        vdjdb_df = _normalize_vdjdb_columns(vdjdb_df, args.chain)
         chain_cfg = CHAIN_COLS[args.chain]
         required_cols = ["antigen.epitope", chain_cfg["cdr3"]]
         before_chain_cleanup = len(vdjdb_df)
