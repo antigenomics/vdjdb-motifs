@@ -643,7 +643,7 @@ def main():
         args.output = str(output_root)
         args.background_embedding = str(Path(args.background_embedding).resolve())
 
-        proto_path = resolve_prototype_file(args.prototypes_path)
+        proto_path = resolve_prototype_file(args.prototypes_path, chain=args.chain)
 
         logging.info("Loading prototypes")
         proto = load_prototype_repertoire(proto_path, lib, locus, args.index_col)
