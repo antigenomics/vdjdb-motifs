@@ -54,7 +54,7 @@ Assumptions:
 - By default it downloads `https://zenodo.org/record/6339774/files/redcea_bg.gz`.
 - You can still pass a different Zenodo archive URL as the first argument if needed.
 - `scripts/setup.sh redcea <url>` passes that URL through to the REDCEA background fetch step.
-- `scripts/install_redcea.sh` creates a separate conda environment, installs `tcremp` from `https://github.com/antigenomics/tcremp.git`, and then installs this repository's `redcea` package into that environment.
+- `scripts/install_redcea.sh` creates a separate conda environment, installs `tcremp` from `https://github.com/antigenomics/tcremp.git`, installs `redcea` from `https://github.com/antigenomics/redcea`, and then installs this repository's `redcea` package into that environment.
 
 ## REDCEA Zenodo Files
 

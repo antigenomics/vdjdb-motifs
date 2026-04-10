@@ -3,13 +3,23 @@ from __future__ import annotations
 
 import gc
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-import sys
 
 import numpy as np
 import pandas as pd
 
+from .arguments import get_arguments_vdjdb_clusters
 from .config import CHAIN_COLS, DEFAULT_PLOT_BG_POINTS
+
+
+@dataclass(frozen=True)
+class EpitopeClusteringArtifacts:
+    cluster_df: pd.DataFrame
+    summary_df: pd.DataFrame
+    significant_cluster_ids: set[int]
+    sample_cluster_df: pd.DataFrame
+    enriched_sample_cluster_df: pd.DataFrame
 
 
 def resolve_joint_knn(
@@ -33,7 +43,7 @@ def resolve_joint_knn(
     Returns:
         KNN result.
     """
-    from .compat import compute_blockwise_knn_merged
+    from .compat import build_joint_knn_from_split, compute_blockwise_knn_merged
 
     if sample_index_path is None or bg_index_path is None:
         raise ValueError("sample_index_path and bg_index_path must be provided for joint kNN resolution.")
@@ -52,6 +62,19 @@ def resolve_joint_knn(
     )
     if isinstance(result, tuple) and len(result) == 2:
         return result
+    if isinstance(result, tuple) and len(result) == 8:
+        dist_ss, ind_ss, dist_bb, ind_bb, dist_sb, ind_sb, dist_bs, ind_bs = result
+        return build_joint_knn_from_split(
+            dist_ss=dist_ss,
+            ind_ss=ind_ss,
+            dist_bb=dist_bb,
+            ind_bb=ind_bb,
+            dist_sb=dist_sb,
+            ind_sb=ind_sb,
+            dist_bs=dist_bs,
+            ind_bs=ind_bs,
+            k_out=k_neighbors,
+        )
 
     import faiss
 
@@ -66,15 +89,16 @@ def _compute_sample_embeddings(
     args, genes: list[str], locus: str, lib, proto, paths, chain: str, prefix: str, airr_path: Path
 ):
     """Compute or load sample embeddings."""
-    from .compat import compute_embeddings_if_needed, load_embeddings
+    from .compat import compute_embeddings_if_needed, load_embedding_artifacts, normalize_config
 
     args.sample = str(airr_path.resolve())
     args.sample_embedding = str((paths.tcremp_dir / f"{prefix}_sample_embeddings.parquet").resolve())
     args.prefix = prefix
+    config = normalize_config(args)
 
     compute_embeddings_if_needed(
-        path=args.sample,
-        args=args,
+        path=config.sample,
+        config=config,
         is_sample=True,
         proto=proto,
         chain=genes,
@@ -84,9 +108,9 @@ def _compute_sample_embeddings(
         output_path=paths.tcremp_dir,
     )
 
-    return load_embeddings(
-        path=args.sample,
-        args=args,
+    return load_embedding_artifacts(
+        path=config.sample,
+        args=config,
         is_sample=True,
         lib=lib,
         locus=locus,
@@ -97,15 +121,16 @@ def _compute_sample_embeddings(
 
 def _load_precomputed_sample_embeddings(args, lib, locus: str, paths, prefix: str, airr_path: Path):
     """Load previously computed per-epitope embeddings from saved files."""
-    from .compat import load_embeddings
+    from .compat import load_embedding_artifacts, normalize_config
 
     args.sample = str(airr_path.resolve())
     args.sample_embedding = str((paths.tcremp_dir / f"{prefix}_sample_embeddings.parquet").resolve())
     args.prefix = prefix
+    config = normalize_config(args)
 
-    return load_embeddings(
-        path=args.sample,
-        args=args,
+    return load_embedding_artifacts(
+        path=config.sample,
+        args=config,
         is_sample=True,
         lib=lib,
         locus=locus,
@@ -165,7 +190,7 @@ def _precompute_epitope_embeddings(
 
     logging.info("Preparing epitope %s with %d clonotypes", epitope, len(ep_df))
     build_airr_from_epitope(ep_df, chain).to_csv(airr_path, sep="\t", index=False)
-    sample_emb, sample_reps, sample_ids, _, sample_index_path = _compute_sample_embeddings(
+    sample_artifacts = _compute_sample_embeddings(
         args, genes, locus, lib, proto, paths, chain, prefix, airr_path
     )
     return {
@@ -174,7 +199,7 @@ def _precompute_epitope_embeddings(
         "prefix": prefix,
         "airr_path": airr_path,
         "sample_embedding_path": paths.tcremp_dir / f"{prefix}_sample_embeddings.parquet",
-        "n_sample_rows": len(sample_ids),
+        "n_sample_rows": len(sample_artifacts.ids),
     }
 
 
@@ -192,16 +217,16 @@ def _load_epitope_input(
     airr_path = epitope_info["airr_path"]
 
     logging.info("Loading precomputed embeddings for epitope %s", epitope)
-    sample_emb, sample_reps, sample_ids, _, sample_index_path = _load_precomputed_sample_embeddings(
+    sample_artifacts = _load_precomputed_sample_embeddings(
         args, lib, locus, paths, prefix, airr_path
     )
     loaded = dict(epitope_info)
     loaded.update(
         {
-            "sample_emb": sample_emb,
-            "sample_reps": sample_reps,
-            "sample_ids": sample_ids,
-            "sample_index_path": sample_index_path,
+            "sample_emb": sample_artifacts.embeddings,
+            "sample_reps": sample_artifacts.representations,
+            "sample_ids": sample_artifacts.ids,
+            "sample_index_path": sample_artifacts.cache_path,
         }
     )
     return loaded
@@ -377,6 +402,49 @@ def _save_cluster_results(
     cluster_members_df.to_csv(paths.tcrempnet_dir / f"{prefix}_cluster_members.tsv", sep="\t", index=False)
 
 
+def _build_epitope_clustering_artifacts(
+    *,
+    labels,
+    sample_ids: pd.Series,
+    bg_ids: pd.Series,
+    sample_reps: pd.DataFrame,
+    bg_reps: pd.DataFrame,
+) -> EpitopeClusteringArtifacts:
+    """Build the per-epitope clustering tables.
+
+    This mirrors the shared RedCEA pattern of:
+    1. creating a joint cluster table,
+    2. computing summary statistics,
+    3. extracting enriched/significant sample clusters,
+    while preserving the exact vdjdb_redcea selection logic.
+    """
+    from .compat import compute_cluster_summary
+
+    joint_ids = pd.concat([sample_ids, bg_ids], ignore_index=True)
+    joint_reps = pd.concat([sample_reps, bg_reps], ignore_index=True)
+    cluster_df = pd.DataFrame({"clone_id": joint_ids, "cluster_id": labels}).merge(
+        joint_reps, on="clone_id", how="left"
+    )
+
+    summary_df = compute_cluster_summary(cluster_df.copy(), sample_ids)
+    summary_df, significant_cluster_ids = _compute_summary_and_significance(summary_df, sample_ids, bg_ids)
+
+    sample_cluster_df = cluster_df[
+        (cluster_df["clone_id"].isin(set(sample_ids))) & (cluster_df["cluster_id"] != -1)
+    ].copy()
+    enriched_sample_cluster_df = sample_cluster_df[
+        sample_cluster_df["cluster_id"].isin(significant_cluster_ids)
+    ].copy()
+
+    return EpitopeClusteringArtifacts(
+        cluster_df=cluster_df,
+        summary_df=summary_df,
+        significant_cluster_ids=significant_cluster_ids,
+        sample_cluster_df=sample_cluster_df,
+        enriched_sample_cluster_df=enriched_sample_cluster_df,
+    )
+
+
 def process_epitope(
     epitope_data: dict[str, object],
     *,
@@ -403,7 +471,6 @@ def process_epitope(
     Returns:
         Tuple of clustered DataFrame and cluster members DataFrame.
     """
-    from .compat import compute_cluster_summary
     from .io import build_sample_members_table, sanitize_filename_token
     from .plotting import save_cluster_plot_html
 
@@ -421,30 +488,28 @@ def process_epitope(
     logging.info("Processing epitope %s with %d clonotypes", epitope, len(ep_df))
     sample_pca, labels = _perform_clustering(sample_pca, bg_pca, args, sample_index_path, bg_index_path, sample_ids, bg_ids)
 
-    joint_ids = pd.concat([sample_ids, bg_ids], ignore_index=True)
-    joint_reps = pd.concat([sample_reps, bg_reps], ignore_index=True)
-    cluster_df = pd.DataFrame({"clone_id": joint_ids, "cluster_id": labels}).merge(
-        joint_reps, on="clone_id", how="left"
+    artifacts = _build_epitope_clustering_artifacts(
+        labels=labels,
+        sample_ids=sample_ids,
+        bg_ids=bg_ids,
+        sample_reps=sample_reps,
+        bg_reps=bg_reps,
     )
-
-    summary_df = compute_cluster_summary(cluster_df.copy(), sample_ids)
-    summary_df, significant_cluster_ids = _compute_summary_and_significance(summary_df, sample_ids, bg_ids)
-
-    sample_cluster_df = cluster_df[
-        (cluster_df["clone_id"].isin(set(sample_ids))) & (cluster_df["cluster_id"] != -1)
-    ].copy()
-    sample_cluster_count = sample_cluster_df["cluster_id"].nunique()
-
-    enriched_sample_cluster_df = sample_cluster_df[
-        sample_cluster_df["cluster_id"].isin(significant_cluster_ids)
-    ].copy()
-    enriched_cluster_count = enriched_sample_cluster_df["cluster_id"].nunique()
+    sample_cluster_count = artifacts.sample_cluster_df["cluster_id"].nunique()
+    enriched_cluster_count = artifacts.enriched_sample_cluster_df["cluster_id"].nunique()
 
     cluster_members_df = build_sample_members_table(
-        sample_cluster_df, summary_df, chain, ep_df, epitope, sample_ids, sample_umap
+        artifacts.sample_cluster_df, artifacts.summary_df, chain, ep_df, epitope, sample_ids, sample_umap
     )
 
-    _save_cluster_results(cluster_df, summary_df, sample_cluster_df, cluster_members_df, paths, prefix)
+    _save_cluster_results(
+        artifacts.cluster_df,
+        artifacts.summary_df,
+        artifacts.sample_cluster_df,
+        cluster_members_df,
+        paths,
+        prefix,
+    )
 
     sample_labels = np.asarray(labels[: len(sample_ids)], dtype=np.int32)
     viz_filename = (
@@ -458,8 +523,8 @@ def process_epitope(
         sample_reps=sample_reps,
         sample_ids=sample_ids,
         sample_labels=sample_labels,
-        significant_cluster_ids=significant_cluster_ids,
-        summary_df=summary_df,
+        significant_cluster_ids=artifacts.significant_cluster_ids,
+        summary_df=artifacts.summary_df,
         sample_umap=sample_umap,
         bg_umap=bg_umap,
         output_path=paths.viz_dir / viz_filename,
@@ -468,14 +533,15 @@ def process_epitope(
     logging.info(
         "Done %s: clustered_sample points=%d/%d, clusters=%d; enriched points=%d, clusters=%d",
         epitope,
-        len(sample_cluster_df),
+        len(artifacts.sample_cluster_df),
         len(sample_reps),
         sample_cluster_count,
-        len(enriched_sample_cluster_df),
+        len(artifacts.enriched_sample_cluster_df),
         enriched_cluster_count,
     )
 
-    del sample_reps, sample_ids, sample_pca, sample_umap, labels, joint_ids, joint_reps, cluster_df
+    sample_cluster_df = artifacts.sample_cluster_df
+    del sample_reps, sample_ids, sample_pca, sample_umap, labels, artifacts
     gc.collect()
     return sample_cluster_df, cluster_members_df
 
@@ -483,31 +549,12 @@ def process_epitope(
 def main():
     """Main function for VDJdb epitope clustering."""
     try:
-        try:
-            from tcremp.arguments import get_arguments_vdjdb_clusters
-        except ImportError:
-            if any(flag in sys.argv for flag in ("-h", "--help")):
-                print(
-                    "vdjdb-redcea\n"
-                    "Required arguments:\n"
-                    "  --vdjdb PATH\n"
-                    "  --background-airr PATH\n"
-                    "  --background-embedding PATH\n"
-                    "  --output PATH\n"
-                    "  --chain {TRA,TRB}\n"
-                    "Optional examples:\n"
-                    "  --species HomoSapiens\n"
-                    "  --epitopes GILGFVFTL NLVPMVATV\n"
-                    "  --min-epitope-clonotypes 30\n"
-                )
-                return
-            raise
-
         from .compat import (
             SegmentLibrary,
             configure_logging,
-            load_embeddings,
+            load_embedding_artifacts,
             load_prototype_repertoire,
+            normalize_config,
             prepare_output_path,
             resolve_prototype_file,
             subsample_repertoire,
@@ -567,15 +614,20 @@ def main():
         logging.info("Loaded %d prototypes", len(proto))
 
         logging.info("Loading background embeddings")
-        bg_emb, bg_reps, bg_ids, _, bg_index_path = load_embeddings(
-            path=args.background,
-            args=args,
+        config = normalize_config(args)
+        bg_artifacts = load_embedding_artifacts(
+            path=config.background,
+            args=config,
             is_sample=False,
             lib=lib,
             locus=locus,
             prefix=f"{args.chain.lower()}_background",
             output_path=paths.tcremp_dir,
         )
+        bg_emb = bg_artifacts.embeddings
+        bg_reps = bg_artifacts.representations
+        bg_ids = bg_artifacts.ids
+        bg_index_path = bg_artifacts.cache_path
 
         epitope_infos = _stage_precompute_epitope_embeddings(
             vdjdb_df,
