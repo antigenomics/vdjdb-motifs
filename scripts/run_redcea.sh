@@ -37,8 +37,9 @@ run_chain() {
   local bg_airr="$2"
   local bg_embedding="$3"
   local output_dir="$4"
+  local log_path="$output_dir/${chain,,}.log"
 
-  conda run -n "$REDCEA_CONDA_ENV" python -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \
+  conda run -n "$REDCEA_CONDA_ENV" python -u -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \
     --vdjdb "$REDCEA_VDJDB" \
     --background-airr "$bg_airr" \
     --background-embedding "$bg_embedding" \
@@ -46,7 +47,8 @@ run_chain() {
     --chain "$chain" \
     --species "$REDCEA_SPECIES" \
     --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
-    --nproc "$REDCEA_NPROC"
+    --nproc "$REDCEA_NPROC" \
+    2>&1 | tee "$log_path"
 }
 
 run_chain TRA "$TRA_BG_AIRR" "$TRA_BG_EMBEDDING" "$REDCEA_OUTPUT" &
