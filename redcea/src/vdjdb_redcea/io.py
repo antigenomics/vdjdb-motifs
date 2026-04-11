@@ -104,6 +104,12 @@ def load_or_fit_background_transform(*, args, output_root: Path, bg_emb: pd.Data
     """
     transform_path = get_background_transform_path(args=args, output_root=output_root)
 
+    def _transform_matches_requested_umap(transform: BackgroundTransform) -> bool:
+        return (
+            int(getattr(transform, "umap_n_neighbors", 15)) == int(args.umap_n_neighbors)
+            and float(getattr(transform, "umap_min_dist", 0.1)) == float(args.umap_min_dist)
+        )
+
     def _fit_and_save_transform() -> BackgroundTransform:
         logging.info(
             "Preparing to fit background transform: chain=%s, n_bg=%d, n_features=%s, path=%s",
@@ -116,6 +122,8 @@ def load_or_fit_background_transform(*, args, output_root: Path, bg_emb: pd.Data
         transform = BackgroundTransform(
             chain=args.chain,
             n_pca_components=args.cluster_pc_components,
+            umap_n_neighbors=args.umap_n_neighbors,
+            umap_min_dist=args.umap_min_dist,
             random_state=args.random_seed,
         )
         logging.info("Calling BackgroundTransform.fit(...)")
@@ -137,6 +145,16 @@ def load_or_fit_background_transform(*, args, output_root: Path, bg_emb: pd.Data
                 "Loaded cached background transform successfully: background_pca_shape=%s",
                 getattr(getattr(transform, "background_pca_", None), "shape", None),
             )
+            if not _transform_matches_requested_umap(transform):
+                logging.info(
+                    "Cached background transform UMAP parameters do not match requested values "
+                    "(cached n_neighbors=%s, min_dist=%s; requested n_neighbors=%s, min_dist=%s). Recomputing.",
+                    getattr(transform, "umap_n_neighbors", None),
+                    getattr(transform, "umap_min_dist", None),
+                    args.umap_n_neighbors,
+                    args.umap_min_dist,
+                )
+                transform = _fit_and_save_transform()
         except ModuleNotFoundError as exc:
             logging.warning(
                 "Failed to load cached background transform from %s due to legacy module path (%s). Recomputing it.",

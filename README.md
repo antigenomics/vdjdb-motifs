@@ -94,6 +94,11 @@ Practical recommendation:
 - if you want one fast default path, standardize on one `N` for `--n-bg-points` and upload the matching cached UMAP file too
 - `./scripts/run_redcea.sh` uses the default local paths above directly
 
+UMAP tuning note:
+- the REDCEA plotting layout now accepts `--umap-n-neighbors` and `--umap-min-dist`
+- if sample clusters form detached islands far from the grey background cloud, try increasing these values, for example `--umap-n-neighbors 50 --umap-min-dist 0.4`
+- changing either value invalidates the previous plotting transform on purpose, so the cached background transform is recomputed automatically
+
 ## Notes
 
 - TCRNET outputs now go to `results/tcrnet/` and keep the standard names `cluster_members.txt` and `motif_pwms.txt`.

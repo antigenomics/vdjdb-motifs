@@ -66,6 +66,18 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         default=42,
         help="Random seed for background transform and optional prototype sampling.",
     )
+    parser.add_argument(
+        "--umap-n-neighbors",
+        type=int,
+        default=15,
+        help="UMAP neighborhood size for the joint plotting layout. Larger values usually make the map more global and compact.",
+    )
+    parser.add_argument(
+        "--umap-min-dist",
+        type=float,
+        default=0.1,
+        help="UMAP minimum distance for the joint plotting layout. Larger values usually reduce tight isolated islands.",
+    )
     parser.add_argument("--nproc", type=int, default=1, help="Number of worker threads/processes.")
     parser.set_defaults(
         prefix=None,

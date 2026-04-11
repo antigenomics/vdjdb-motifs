@@ -81,36 +81,51 @@ def resolve_joint_knn(
     """
     from .compat import build_joint_knn_from_split, compute_blockwise_knn_merged
 
-    if sample_index_path is None or bg_index_path is None:
-        raise ValueError("sample_index_path and bg_index_path must be provided for joint kNN resolution.")
-
-    result = compute_blockwise_knn_merged(
-        bg=bg_pca,
-        sample=sample_pca,
-        k_neighbors=k_neighbors,
-        bg_index_path=bg_index_path,
-        sample_index_path=sample_index_path,
-        rebuild_bg=False,
-        rebuild_sample=False,
-        save_blocks=False,
-        output_dir=None,
-        nproc=nproc,
-    )
-    if isinstance(result, tuple) and len(result) == 2:
-        return result
-    if isinstance(result, tuple) and len(result) == 8:
-        dist_ss, ind_ss, dist_bb, ind_bb, dist_sb, ind_sb, dist_bs, ind_bs = result
-        return build_joint_knn_from_split(
-            dist_ss=dist_ss,
-            ind_ss=ind_ss,
-            dist_bb=dist_bb,
-            ind_bb=ind_bb,
-            dist_sb=dist_sb,
-            ind_sb=ind_sb,
-            dist_bs=dist_bs,
-            ind_bs=ind_bs,
-            k_out=k_neighbors,
-        )
+    if sample_index_path is not None and bg_index_path is not None:
+        try:
+            result = compute_blockwise_knn_merged(
+                bg=bg_pca,
+                sample=sample_pca,
+                k_neighbors=k_neighbors,
+                bg_index_path=bg_index_path,
+                sample_index_path=sample_index_path,
+                rebuild_bg=False,
+                rebuild_sample=False,
+                save_blocks=False,
+                output_dir=None,
+                nproc=nproc,
+            )
+            if isinstance(result, tuple) and len(result) == 2:
+                return result
+            if isinstance(result, tuple) and len(result) == 8:
+                dist_ss, ind_ss, dist_bb, ind_bb, dist_sb, ind_sb, dist_bs, ind_bs = result
+                return build_joint_knn_from_split(
+                    dist_ss=dist_ss,
+                    ind_ss=ind_ss,
+                    dist_bb=dist_bb,
+                    ind_bb=ind_bb,
+                    dist_sb=dist_sb,
+                    ind_sb=ind_sb,
+                    dist_bs=dist_bs,
+                    ind_bs=ind_bs,
+                    k_out=k_neighbors,
+                )
+            logging.warning(
+                "Unexpected blockwise kNN result for sample index %s and background index %s; "
+                "falling back to direct joint FAISS search.",
+                sample_index_path,
+                bg_index_path,
+            )
+        except Exception as exc:
+            logging.warning(
+                "Failed to load cached FAISS indexes (%s, %s): %s. "
+                "Falling back to direct joint FAISS search.",
+                sample_index_path,
+                bg_index_path,
+                exc,
+            )
+    else:
+        logging.warning("Missing cached FAISS indexes; falling back to direct joint FAISS search.")
 
     import faiss
 
@@ -672,6 +687,16 @@ def main():
         bg_ids = bg_artifacts.ids
         bg_index_path = bg_artifacts.cache_path
 
+        transform, transform_path, bg_pca = _stage_fit_background_transform(
+            args=args,
+            output_root=output_root,
+            bg_emb=bg_emb,
+        )
+
+        # Fit the background-only transform before the heavy per-epitope
+        # embedding stage. This avoids the cold-start path where a long
+        # embedding precompute run can leave the subsequent transform step
+        # appearing stalled on the very first launch.
         epitope_infos = _stage_precompute_epitope_embeddings(
             vdjdb_df,
             args=args,
@@ -680,12 +705,6 @@ def main():
             lib=lib,
             proto=proto,
             paths=paths,
-        )
-
-        transform, transform_path, bg_pca = _stage_fit_background_transform(
-            args=args,
-            output_root=output_root,
-            bg_emb=bg_emb,
         )
 
         epitope_inputs, bg_umap = _stage_prepare_joint_umap(
