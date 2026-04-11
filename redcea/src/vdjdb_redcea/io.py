@@ -104,19 +104,48 @@ def load_or_fit_background_transform(*, args, output_root: Path, bg_emb: pd.Data
     """
     transform_path = get_background_transform_path(args=args, output_root=output_root)
 
-    if transform_path.exists():
-        logging.info("Loading background transform from %s", transform_path)
-        transform = BackgroundTransform.load(transform_path)
-    else:
-        logging.info("Fitting background transform on %d background clonotypes", len(bg_emb))
+    def _fit_and_save_transform() -> BackgroundTransform:
+        logging.info(
+            "Preparing to fit background transform: chain=%s, n_bg=%d, n_features=%s, path=%s",
+            args.chain,
+            len(bg_emb),
+            getattr(bg_emb, "shape", None),
+            transform_path,
+        )
+        logging.info("Instantiating BackgroundTransform")
         transform = BackgroundTransform(
             chain=args.chain,
             n_pca_components=args.cluster_pc_components,
             random_state=args.random_seed,
         )
+        logging.info("Calling BackgroundTransform.fit(...)")
         transform.fit(bg_emb)
+        logging.info(
+            "BackgroundTransform.fit(...) finished: background_pca_shape=%s",
+            getattr(getattr(transform, "background_pca_", None), "shape", None),
+        )
+        logging.info("Saving background transform to %s", transform_path)
         transform.save(transform_path)
         logging.info("Saved background transform to %s", transform_path)
+        return transform
+
+    if transform_path.exists():
+        logging.info("Loading background transform from %s", transform_path)
+        try:
+            transform = BackgroundTransform.load(transform_path)
+            logging.info(
+                "Loaded cached background transform successfully: background_pca_shape=%s",
+                getattr(getattr(transform, "background_pca_", None), "shape", None),
+            )
+        except ModuleNotFoundError as exc:
+            logging.warning(
+                "Failed to load cached background transform from %s due to legacy module path (%s). Recomputing it.",
+                transform_path,
+                exc,
+            )
+            transform = _fit_and_save_transform()
+    else:
+        transform = _fit_and_save_transform()
 
     return transform, transform_path
 

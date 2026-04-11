@@ -9,6 +9,7 @@ REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
 REDCEA_NPROC="${REDCEA_NPROC:-8}"
 REDCEA_CONDA_ENV="${REDCEA_CONDA_ENV:-vdjdb-redcea}"
 REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-100}"
+REDCEA_CHAIN="${REDCEA_CHAIN:-both}"
 
 TRA_BG_AIRR="${TRA_BG_AIRR:-redcea/data/backgrounds/tra_background_100k.tsv}"
 TRA_BG_EMBEDDING="${TRA_BG_EMBEDDING:-redcea/data/backgrounds/tra_background_embeddings.parquet}"
@@ -32,6 +33,15 @@ do
   fi
 done
 
+case "$REDCEA_CHAIN" in
+  TRA|TRB|both)
+    ;;
+  *)
+    echo "Unsupported REDCEA_CHAIN value: $REDCEA_CHAIN (expected TRA, TRB, or both)" >&2
+    exit 1
+    ;;
+esac
+
 run_chain() {
   local chain="$1"
   local bg_airr="$2"
@@ -51,11 +61,17 @@ run_chain() {
     2>&1 | tee "$log_path"
 }
 
-run_chain TRA "$TRA_BG_AIRR" "$TRA_BG_EMBEDDING" "$REDCEA_OUTPUT" &
-pid_tra=$!
+if [[ "$REDCEA_CHAIN" == "TRA" ]]; then
+  run_chain TRA "$TRA_BG_AIRR" "$TRA_BG_EMBEDDING" "$REDCEA_OUTPUT"
+elif [[ "$REDCEA_CHAIN" == "TRB" ]]; then
+  run_chain TRB "$TRB_BG_AIRR" "$TRB_BG_EMBEDDING" "$REDCEA_OUTPUT"
+else
+  run_chain TRA "$TRA_BG_AIRR" "$TRA_BG_EMBEDDING" "$REDCEA_OUTPUT" &
+  pid_tra=$!
 
-run_chain TRB "$TRB_BG_AIRR" "$TRB_BG_EMBEDDING" "$REDCEA_OUTPUT" &
-pid_trb=$!
+  run_chain TRB "$TRB_BG_AIRR" "$TRB_BG_EMBEDDING" "$REDCEA_OUTPUT" &
+  pid_trb=$!
 
-wait "$pid_tra"
-wait "$pid_trb"
+  wait "$pid_tra"
+  wait "$pid_trb"
+fi

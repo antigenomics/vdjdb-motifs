@@ -301,11 +301,17 @@ def _stage_fit_background_transform(*, args, output_root: Path, bg_emb: pd.DataF
     """Stage 2: fit or load background-only PCA transform."""
     from .io import load_or_fit_background_transform
 
-    logging.info("Stage 2/4: fitting or loading background transform")
+    logging.info(
+        "Stage 2/4: fitting or loading background transform for chain=%s with bg_emb_shape=%s",
+        args.chain,
+        getattr(bg_emb, "shape", None),
+    )
     transform, transform_path = load_or_fit_background_transform(args=args, output_root=output_root, bg_emb=bg_emb)
     bg_pca = transform.background_pca_
     if bg_pca is None:
+        logging.info("Cached transform has no background_pca_; calling transform.transform_pca(bg_emb)")
         bg_pca = transform.transform_pca(bg_emb)
+        logging.info("transform.transform_pca(bg_emb) finished: bg_pca_shape=%s", getattr(bg_pca, "shape", None))
 
     # The full background embedding matrix is no longer needed after PCA/transform fit.
     del bg_emb
