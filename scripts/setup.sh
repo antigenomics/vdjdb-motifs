@@ -16,7 +16,7 @@ Examples:
   ./scripts/setup.sh tcrnet
   ./scripts/setup.sh redcea
   ./scripts/setup.sh all
-  ./scripts/setup.sh redcea https://zenodo.org/record/19262060/files/redcea_bg.gz
+  ./scripts/setup.sh redcea https://zenodo.org/records/19520535/files/redcea_bg.gz
 EOF
 }
 

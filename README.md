@@ -70,7 +70,7 @@ Notes on these requirements:
   - AIRR repertoire table
   - embedding parquet file
 - The repository now includes a downloader script for `redcea`.
-- By default it downloads `https://zenodo.org/record/19262060/files/redcea_bg.gz`.
+- By default it downloads `https://zenodo.org/records/19520535/files/redcea_bg.gz`.
 - You can still pass a different Zenodo archive URL as the first argument if needed.
 - `scripts/setup.sh redcea <url>` passes that URL through to the REDCEA background fetch step.
 - `scripts/install_redcea.sh` creates a separate conda environment and installs this repository's `redcea` package together with its declared git-based dependencies.
@@ -79,7 +79,7 @@ Notes on these requirements:
 
 If you want `redcea` to start quickly from downloaded assets, the default Zenodo bundle is:
 
-- `https://zenodo.org/record/19262060/files/redcea_bg.gz`
+- `https://zenodo.org/records/19520535/files/redcea_bg.gz`
 
 Required per chain:
 - `tra_background_100k.tsv`

@@ -3,7 +3,7 @@
 __pycache__/
 *.pyc
 
-*/viz/*.html
+*.html
 
 tcrnet/pools/
 tcrnet/pools.zip
