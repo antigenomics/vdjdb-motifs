@@ -24,8 +24,9 @@ select = dplyr::select
 PIPELINE_DIR = ifelse(basename(normalizePath(getwd(), winslash = "/", mustWork = TRUE)) == "tcrnet", ".", "tcrnet")
 setwd(PIPELINE_DIR)
 
+TCRNET_NPROC = as.integer(Sys.getenv("TCRNET_NPROC", unset = "8"))
 VDJTOOLS_PATH = Sys.getenv("VDJTOOLS_PATH", unset = "/software/bin/vdjtools")
-VDJDB_SLIM_PATH = Sys.getenv("VDJDB_SLIM_PATH", unset = "vdjdb_dump/vdjdb.slim.txt")
+VDJDB_SLIM_PATH = Sys.getenv("VDJDB_SLIM_PATH", unset = "../vdjdb_release/vdjdb.slim.txt")
 POOLS_PATH = Sys.getenv("POOLS_PATH", unset = "pools/")
 RESULTS_DIR = Sys.getenv("RESULTS_DIR", unset = "../results/tcrnet")
 FIGURES_DIR = Sys.getenv("FIGURES_DIR", unset = "../figures")
@@ -185,7 +186,7 @@ compute_edges <- function(cdr3.1, cdr3.2, combine) {
   
   stringdistmatrix(cdr3.1, cdr3.2, 
                    method = "hamming", 
-                   nthread = 80,
+                   nthread = TCRNET_NPROC,
                    useNames = "strings") %>%
     as.matrix %>%
     melt %>% 
@@ -330,7 +331,7 @@ df.flataa <- df.cc.sel %>%
   mclapply(function(x) data.frame(cdr3aa = paste0(x, collapse = ""), 
                                   aa = x, stringsAsFactors = F) %>%
              mutate(pos = 0:(n()-1)),
-           mc.cores = 80) %>%
+           mc.cores = TCRNET_NPROC) %>%
   rbindlist
 ```
 

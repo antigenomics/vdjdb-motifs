@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import colorsys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.colors import hex_to_rgb, sample_colorscale, unlabel_rgb
 
 from .config import CHAIN_COLS
 
@@ -14,6 +16,57 @@ def _format_cluster_display_label(*, chain: str, epitope: str, cluster_id: int) 
     """Format cluster labels exactly like ``cid`` in final cluster member tables."""
     chain_tag = "A" if chain == "TRA" else "B"
     return f"H.{chain_tag}.{epitope}.{int(cluster_id)}"
+
+
+def _parse_plotly_color(color: str) -> tuple[int, int, int]:
+    """Parse Plotly ``#hex`` and ``rgb(...)`` colors into integer RGB."""
+    if color.startswith("#"):
+        return hex_to_rgb(color)
+    if color.startswith("rgb"):
+        return tuple(int(round(channel)) for channel in unlabel_rgb(color))
+    raise ValueError(f"Unsupported Plotly color format: {color}")
+
+
+def _is_non_gray_color(color: str, *, min_saturation: float = 0.28) -> bool:
+    """Keep only sufficiently saturated colors to avoid gray-ish cluster markers."""
+    red, green, blue = _parse_plotly_color(color)
+    hue, lightness, saturation = colorsys.rgb_to_hls(red / 255, green / 255, blue / 255)
+    _ = hue, lightness
+    return saturation >= min_saturation
+
+
+def _build_cluster_palette(n_colors: int) -> list[str]:
+    """Return a large non-gray palette sized to the number of displayed clusters."""
+    if n_colors <= 0:
+        return []
+
+    palette_names = ("Alphabet", "Light24", "Dark24", "Safe", "Vivid", "Prism")
+    palette_pool: list[str] = []
+    seen_colors: set[str] = set()
+
+    for palette_name in palette_names:
+        for color in getattr(px.colors.qualitative, palette_name):
+            if not _is_non_gray_color(color):
+                continue
+            if color in seen_colors:
+                continue
+            palette_pool.append(color)
+            seen_colors.add(color)
+
+    if n_colors <= len(palette_pool):
+        return palette_pool[:n_colors]
+
+    extra_needed = n_colors - len(palette_pool)
+    if extra_needed == 1:
+        extra_positions = [0.5]
+    else:
+        extra_positions = np.linspace(0.0, 1.0, extra_needed, endpoint=False).tolist()
+    extra_colors = [
+        color
+        for color in sample_colorscale("Turbo", extra_positions, colortype="rgb")
+        if _is_non_gray_color(color) and color not in seen_colors
+    ]
+    return (palette_pool + extra_colors)[:n_colors]
 
 
 def build_cluster_plot(
@@ -66,9 +119,9 @@ def build_cluster_plot(
     category_orders = {"cluster": ["unclustered"] + ordered_cluster_labels}
 
     color_discrete_map = {"unclustered": "lightgrey"}
-    enriched_palette = px.colors.qualitative.Plotly
-    for i, cluster_label in enumerate(ordered_cluster_labels):
-        color_discrete_map[cluster_label] = enriched_palette[i % len(enriched_palette)]
+    enriched_palette = _build_cluster_palette(len(ordered_cluster_labels))
+    for cluster_label, color in zip(ordered_cluster_labels, enriched_palette):
+        color_discrete_map[cluster_label] = color
 
     hover_cols = {
         col: True
@@ -78,13 +131,15 @@ def build_cluster_plot(
             f"j_{cfg['gene']}",
             "clone_id",
             "cluster",
-            "cluster_label",
             "cluster_id",
             "cluster_size_sample",
-            "significant",
         )
         if col in sample_df.columns
     }
+    hover_cols["x"] = False
+    hover_cols["y"] = False
+    hover_cols["cluster_label"] = False
+    hover_cols["significant"] = False
     if "log_fold_change" in sample_df.columns:
         hover_cols["log_fold_change"] = ":.2f"
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-REDCEA_VDJDB="${REDCEA_VDJDB:-tcrnet/vdjdb_dump/vdjdb.slim.txt}"
+REDCEA_VDJDB="${REDCEA_VDJDB:-vdjdb_release/vdjdb.slim.txt}"
 REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
 REDCEA_NPROC="${REDCEA_NPROC:-8}"
 REDCEA_CONDA_ENV="${REDCEA_CONDA_ENV:-vdjdb-redcea}"
@@ -20,25 +20,39 @@ REDCEA_OUTPUT="${REDCEA_OUTPUT:-results/redcea}"
 
 mkdir -p "$REDCEA_OUTPUT"
 
-for required_path in \
-  "$REDCEA_VDJDB" \
-  "$TRA_BG_AIRR" \
-  "$TRA_BG_EMBEDDING" \
-  "$TRB_BG_AIRR" \
-  "$TRB_BG_EMBEDDING"
-do
-  if [[ ! -e "$required_path" ]]; then
-    echo "Required input not found: $required_path" >&2
-    exit 1
-  fi
-done
-
 case "$REDCEA_CHAIN" in
   TRA|TRB|both)
     ;;
   *)
     echo "Unsupported REDCEA_CHAIN value: $REDCEA_CHAIN (expected TRA, TRB, or both)" >&2
     exit 1
+    ;;
+esac
+
+require_path() {
+  local required_path="$1"
+  if [[ ! -e "$required_path" ]]; then
+    echo "Required input not found: $required_path" >&2
+    exit 1
+  fi
+}
+
+require_path "$REDCEA_VDJDB"
+
+case "$REDCEA_CHAIN" in
+  TRA)
+    require_path "$TRA_BG_AIRR"
+    require_path "$TRA_BG_EMBEDDING"
+    ;;
+  TRB)
+    require_path "$TRB_BG_AIRR"
+    require_path "$TRB_BG_EMBEDDING"
+    ;;
+  both)
+    require_path "$TRA_BG_AIRR"
+    require_path "$TRA_BG_EMBEDDING"
+    require_path "$TRB_BG_AIRR"
+    require_path "$TRB_BG_EMBEDDING"
     ;;
 esac
 

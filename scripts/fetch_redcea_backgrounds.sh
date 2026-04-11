@@ -8,10 +8,8 @@ URL="${1:-https://zenodo.org/record/19262060/files/redcea_bg.gz}"
 OUTPUT_DIR="redcea/data/backgrounds"
 ARCHIVE_PATH="$OUTPUT_DIR/$(basename "$URL")"
 UNPACK_DIR="$OUTPUT_DIR/redcea_bundle"
-TCREMP_DIR="results/redcea/tcremp"
 
 mkdir -p "$OUTPUT_DIR"
-mkdir -p "$TCREMP_DIR"
 
 required_backgrounds=(
   "$OUTPUT_DIR/tra_background_100k.tsv"
@@ -57,11 +55,5 @@ cp "$SOURCE_DIR/tra_background_100k.tsv" "$OUTPUT_DIR/tra_background_100k.tsv"
 cp "$SOURCE_DIR/tra_background_100k_embeddings.parquet" "$OUTPUT_DIR/tra_background_embeddings.parquet"
 cp "$SOURCE_DIR/trb_background_100k.tsv" "$OUTPUT_DIR/trb_background_100k.tsv"
 cp "$SOURCE_DIR/trb_background_100k_embeddings.parquet" "$OUTPUT_DIR/trb_background_embeddings.parquet"
-
-cp "$SOURCE_DIR/tra_background_transform.joblib" "$TCREMP_DIR/tra_background_transform.joblib"
-cp "$SOURCE_DIR/trb_background_transform.joblib" "$TCREMP_DIR/trb_background_transform.joblib"
-
-cp "$SOURCE_DIR"/tra_background_transform_bg_umap_*.npy "$TCREMP_DIR/"
-cp "$SOURCE_DIR"/trb_background_transform_bg_umap_*.npy "$TCREMP_DIR/"
 
 echo "REDCEA background files are ready in $OUTPUT_DIR"
