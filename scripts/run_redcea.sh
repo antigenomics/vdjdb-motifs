@@ -7,7 +7,6 @@ cd "$ROOT_DIR"
 REDCEA_VDJDB="${REDCEA_VDJDB:-vdjdb_release/vdjdb.slim.txt}"
 REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
 REDCEA_NPROC="${REDCEA_NPROC:-8}"
-REDCEA_CONDA_ENV="${REDCEA_CONDA_ENV:-vdjdb-redcea}"
 REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-100}"
 REDCEA_CHAIN="${REDCEA_CHAIN:-both}"
 
@@ -63,12 +62,22 @@ case "$REDCEA_CHAIN" in
     ;;
 esac
 
+activate_redcea_env() {
+  if ! command -v conda >/dev/null 2>&1; then
+    echo "conda is required but was not found in PATH" >&2
+    exit 1
+  fi
+
+  # Initialize conda for this non-interactive bash process, then activate once.
+  eval "$(conda shell.bash hook)"
+  conda activate vdjdb-redcea
+}
+
 run_chain() {
   local chain="$1"
   local bg_airr="$2"
   local bg_embedding="$3"
   local output_dir="$4"
-  local log_path="$output_dir/${chain,,}.log"
   local umap_n_neighbors
   local umap_min_dist
 
@@ -87,7 +96,7 @@ run_chain() {
       ;;
   esac
 
-  conda run -n "$REDCEA_CONDA_ENV" python -u -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \
+  python -u -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \
     --vdjdb "$REDCEA_VDJDB" \
     --background-airr "$bg_airr" \
     --background-embedding "$bg_embedding" \
@@ -97,9 +106,10 @@ run_chain() {
     --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
     --umap-n-neighbors "$umap_n_neighbors" \
     --umap-min-dist "$umap_min_dist" \
-    --nproc "$REDCEA_NPROC" \
-    2>&1 | tee "$log_path"
+    --nproc "$REDCEA_NPROC"
 }
+
+activate_redcea_env
 
 if [[ "$REDCEA_CHAIN" == "TRA" ]]; then
   run_chain TRA "$TRA_BG_AIRR" "$TRA_BG_EMBEDDING" "$REDCEA_OUTPUT"
