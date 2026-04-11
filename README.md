@@ -92,6 +92,8 @@ Practical recommendation:
 
 UMAP tuning note:
 - the REDCEA plotting layout now accepts `--umap-n-neighbors` and `--umap-min-dist`
+- `scripts/run_redcea.sh` keeps separate per-chain defaults via `REDCEA_UMAP_N_NEIGHBORS_TRA` / `REDCEA_UMAP_MIN_DIST_TRA` and `REDCEA_UMAP_N_NEIGHBORS_TRB` / `REDCEA_UMAP_MIN_DIST_TRB`
+- if needed, a global `REDCEA_UMAP_N_NEIGHBORS` or `REDCEA_UMAP_MIN_DIST` environment override still takes precedence for ad hoc runs
 - if sample clusters form detached islands far from the grey background cloud, try increasing these values, for example `--umap-n-neighbors 50 --umap-min-dist 0.4`
 - changing either value invalidates the previous plotting transform on purpose, so the cached background transform is recomputed automatically
 

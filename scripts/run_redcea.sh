@@ -11,6 +11,13 @@ REDCEA_CONDA_ENV="${REDCEA_CONDA_ENV:-vdjdb-redcea}"
 REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-100}"
 REDCEA_CHAIN="${REDCEA_CHAIN:-both}"
 
+# Plotting UMAP defaults can differ per chain. If a global REDCEA_UMAP_* override
+# is set in the environment, it still wins over the chain-specific defaults.
+REDCEA_UMAP_N_NEIGHBORS_TRA="${REDCEA_UMAP_N_NEIGHBORS_TRA:-20}"
+REDCEA_UMAP_MIN_DIST_TRA="${REDCEA_UMAP_MIN_DIST_TRA:-0.4}"
+REDCEA_UMAP_N_NEIGHBORS_TRB="${REDCEA_UMAP_N_NEIGHBORS_TRB:-50}"
+REDCEA_UMAP_MIN_DIST_TRB="${REDCEA_UMAP_MIN_DIST_TRB:-0.4}"
+
 TRA_BG_AIRR="${TRA_BG_AIRR:-redcea/data/backgrounds/tra_background_100k.tsv}"
 TRA_BG_EMBEDDING="${TRA_BG_EMBEDDING:-redcea/data/backgrounds/tra_background_embeddings.parquet}"
 TRB_BG_AIRR="${TRB_BG_AIRR:-redcea/data/backgrounds/trb_background_100k.tsv}"
@@ -62,6 +69,23 @@ run_chain() {
   local bg_embedding="$3"
   local output_dir="$4"
   local log_path="$output_dir/${chain,,}.log"
+  local umap_n_neighbors
+  local umap_min_dist
+
+  case "$chain" in
+    TRA)
+      umap_n_neighbors="${REDCEA_UMAP_N_NEIGHBORS:-$REDCEA_UMAP_N_NEIGHBORS_TRA}"
+      umap_min_dist="${REDCEA_UMAP_MIN_DIST:-$REDCEA_UMAP_MIN_DIST_TRA}"
+      ;;
+    TRB)
+      umap_n_neighbors="${REDCEA_UMAP_N_NEIGHBORS:-$REDCEA_UMAP_N_NEIGHBORS_TRB}"
+      umap_min_dist="${REDCEA_UMAP_MIN_DIST:-$REDCEA_UMAP_MIN_DIST_TRB}"
+      ;;
+    *)
+      echo "Unsupported chain value for UMAP config: $chain" >&2
+      exit 1
+      ;;
+  esac
 
   conda run -n "$REDCEA_CONDA_ENV" python -u -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \
     --vdjdb "$REDCEA_VDJDB" \
@@ -71,6 +95,8 @@ run_chain() {
     --chain "$chain" \
     --species "$REDCEA_SPECIES" \
     --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
+    --umap-n-neighbors "$umap_n_neighbors" \
+    --umap-min-dist "$umap_min_dist" \
     --nproc "$REDCEA_NPROC" \
     2>&1 | tee "$log_path"
 }
