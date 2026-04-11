@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 
+*/viz/*.html
+
 tcrnet/pools/
 tcrnet/pools.zip
 tcrnet/vdjdb_dump/

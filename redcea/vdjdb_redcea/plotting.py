@@ -170,10 +170,22 @@ def build_cluster_plot(
         fig.add_trace(trace)
 
     fig.update_layout(
-        title=f"TCR clustering with background density ({epitope})",
-        width=1000,
-        height=700,
+        title={"text": epitope},
+        width=1100,
+        height=760,
         template="plotly_white",
+        hovermode="closest",
+        legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+        margin={"l": 40, "r": 20, "t": 60, "b": 40},
+        xaxis={"title": "", "showgrid": False, "zeroline": False, "showticklabels": False},
+        yaxis={
+            "title": "",
+            "showgrid": False,
+            "zeroline": False,
+            "showticklabels": False,
+            "scaleanchor": "x",
+            "scaleratio": 1,
+        },
     )
     return fig
 

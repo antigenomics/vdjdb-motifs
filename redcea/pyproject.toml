@@ -35,4 +35,4 @@ vdjdb-redcea = "vdjdb_redcea.vdjdb_epitope_clustering:main"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]

@@ -31,6 +31,7 @@ If you just want one command per pipeline:
 ```
 
 `run_redcea.sh` launches `TRA` and `TRB` in parallel.
+`setup.sh redcea` requires a working `conda` installation because it creates and updates the `vdjdb-redcea` environment automatically.
 
 Thread count is configurable for both pipelines:
 
@@ -48,8 +49,19 @@ If you want to prepare everything in one go:
 Assumptions:
 
 - `vdjdb_release/vdjdb.slim.txt` already exists before running either pipeline.
-- `VDJtools` is already installed and available to TCRNET.
 - the repository is run in a Unix-like environment.
+
+Required command-line tools:
+
+- shared: `bash`
+- TCRNET: `Rscript`, `python`, `VDJtools`, `wget`, `unzip`
+- REDCEA: `conda`, `curl`, `tar`
+
+Notes on these requirements:
+
+- `scripts/setup.sh tcrnet` installs the needed R packages automatically, but it does not install `VDJtools` itself.
+- `scripts/run_tcrnet.sh` now also runs a small Python post-processing step that generates per-epitope HTML visualizations.
+- `scripts/setup.sh redcea` creates and updates the `vdjdb-redcea` conda environment automatically.
 
 ## Background Data
 
@@ -100,6 +112,7 @@ UMAP tuning note:
 ## Notes
 
 - TCRNET outputs now go to `results/tcrnet/` and keep the standard names `cluster_members.txt` and `motif_pwms.txt`.
+- TCRNET HTML visualizations are collected in `results/tcrnet/viz/`.
 - TCRNET PDF figures go to the repository-level `figures/` directory.
 - TCRNET respects `TCRNET_NPROC` for parallel R steps.
 - REDCEA writes both chains into `results/redcea/`.
