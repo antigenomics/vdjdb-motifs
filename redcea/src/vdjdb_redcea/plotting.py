@@ -10,6 +10,12 @@ import plotly.graph_objects as go
 from .config import CHAIN_COLS
 
 
+def _format_cluster_display_label(*, chain: str, epitope: str, cluster_id: int) -> str:
+    """Format cluster labels exactly like ``cid`` in final cluster member tables."""
+    chain_tag = "A" if chain == "TRA" else "B"
+    return f"H.{chain_tag}.{epitope}.{int(cluster_id)}"
+
+
 def build_cluster_plot(
     *,
     epitope: str,
@@ -48,21 +54,21 @@ def build_cluster_plot(
     summary_by_cluster = summary_df.set_index("cluster_id")
     sample_df["cluster_size_sample"] = sample_df["cluster_id"].map(summary_by_cluster["sample"])
     sample_df["log_fold_change"] = sample_df["cluster_id"].map(summary_by_cluster["log_fold_change"])
-    sample_df["cluster"] = np.where(sample_df["significant"], sample_df["cluster_id"].astype(str), "unclustered")
+    sample_df["cluster_label"] = sample_df["cluster_id"].map(
+        lambda cluster_id: _format_cluster_display_label(chain=chain, epitope=epitope, cluster_id=cluster_id)
+    )
+    sample_df["cluster"] = np.where(sample_df["significant"], sample_df["cluster_label"], "unclustered")
     ordered_clusters = sorted(sample_df.loc[sample_df["significant"], "cluster_id"].unique().tolist())
-    ordered_cluster_labels = [str(cluster_id) for cluster_id in ordered_clusters]
+    ordered_cluster_labels = [
+        _format_cluster_display_label(chain=chain, epitope=epitope, cluster_id=cluster_id)
+        for cluster_id in ordered_clusters
+    ]
     category_orders = {"cluster": ["unclustered"] + ordered_cluster_labels}
 
     color_discrete_map = {"unclustered": "lightgrey"}
     enriched_palette = px.colors.qualitative.Plotly
-    enriched_labels = [
-        cluster_label for cluster_label in ordered_cluster_labels if int(cluster_label) in significant_cluster_ids
-    ]
-    for i, cluster_label in enumerate(enriched_labels):
+    for i, cluster_label in enumerate(ordered_cluster_labels):
         color_discrete_map[cluster_label] = enriched_palette[i % len(enriched_palette)]
-    for cluster_label in ordered_cluster_labels:
-        if cluster_label not in color_discrete_map:
-            color_discrete_map[cluster_label] = "#B8B8B8"
 
     hover_cols = {
         col: True
@@ -72,6 +78,7 @@ def build_cluster_plot(
             f"j_{cfg['gene']}",
             "clone_id",
             "cluster",
+            "cluster_label",
             "cluster_id",
             "cluster_size_sample",
             "significant",
