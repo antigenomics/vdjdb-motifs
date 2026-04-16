@@ -555,8 +555,10 @@ def process_epitope(
     sample_cluster_count = artifacts.sample_cluster_df["cluster_id"].nunique()
     enriched_cluster_count = artifacts.enriched_sample_cluster_df["cluster_id"].nunique()
 
+    # Keep cluster_members aligned with the HTML visualization: export only
+    # statistically significant/enriched sample clusters.
     cluster_members_df = build_sample_members_table(
-        artifacts.sample_cluster_df, artifacts.summary_df, chain, ep_df, epitope, sample_ids, sample_umap
+        artifacts.enriched_sample_cluster_df, artifacts.summary_df, chain, ep_df, epitope, sample_ids, sample_umap
     )
 
     _save_cluster_results(
