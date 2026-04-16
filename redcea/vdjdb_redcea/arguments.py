@@ -78,6 +78,11 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         default=0.1,
         help="UMAP minimum distance for the joint plotting layout. Larger values usually reduce tight isolated islands.",
     )
+    parser.add_argument(
+        "--skip-umap",
+        action="store_true",
+        help="Skip joint plotting UMAP and HTML export. Useful for fast clustering parameter tuning.",
+    )
     parser.add_argument("--nproc", type=int, default=1, help="Number of worker threads/processes.")
     parser.set_defaults(
         prefix=None,

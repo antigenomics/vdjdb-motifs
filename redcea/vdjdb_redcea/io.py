@@ -222,7 +222,7 @@ def build_sample_members_table(
     epitope_df: pd.DataFrame,
     epitope: str,
     sample_ids: pd.Series,
-    sample_umap: np.ndarray,
+    sample_umap,
 ) -> pd.DataFrame:
     """Build table of sample cluster members with metadata.
 
@@ -247,14 +247,18 @@ def build_sample_members_table(
     cluster_sizes = summary_df.set_index("cluster_id")["cluster_size"].to_dict()
     chain_tag = "A" if chain == "TRA" else "B"
     sample_cluster_df = sample_cluster_df.copy()
-    umap_df = pd.DataFrame(
-        {
-            "clone_id": sample_ids.to_numpy(),
-            "x": sample_umap[:, 0],
-            "y": sample_umap[:, 1],
-        }
-    )
-    sample_cluster_df = sample_cluster_df.merge(umap_df, on="clone_id", how="left")
+    if sample_umap is None:
+        sample_cluster_df["x"] = pd.NA
+        sample_cluster_df["y"] = pd.NA
+    else:
+        umap_df = pd.DataFrame(
+            {
+                "clone_id": sample_ids.to_numpy(),
+                "x": sample_umap[:, 0],
+                "y": sample_umap[:, 1],
+            }
+        )
+        sample_cluster_df = sample_cluster_df.merge(umap_df, on="clone_id", how="left")
 
     return pd.DataFrame(
         {

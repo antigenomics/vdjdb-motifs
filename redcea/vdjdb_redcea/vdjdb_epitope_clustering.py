@@ -397,7 +397,7 @@ def _stage_run_per_epitope_analysis(
     bg_reps: pd.DataFrame,
     bg_ids: pd.Series,
     bg_index_path: Path,
-    bg_umap: np.ndarray,
+    bg_umap,
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
     """Stage 4: run per-epitope clustering and save outputs."""
     logging.info("Stage 4/4: running per-epitope clustering analysis")
@@ -511,7 +511,7 @@ def process_epitope(
     bg_reps: pd.DataFrame,
     bg_ids: pd.Series,
     bg_index_path: Path,
-    bg_umap: np.ndarray,
+    bg_umap,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Process a single epitope for clustering.
 
@@ -538,7 +538,7 @@ def process_epitope(
     sample_ids = epitope_data["sample_ids"]
     sample_index_path = epitope_data["sample_index_path"]
     sample_pca = epitope_data["sample_pca"]
-    sample_umap = epitope_data["sample_umap"]
+    sample_umap = epitope_data.get("sample_umap")
 
     chain = args.chain
 
@@ -570,24 +570,25 @@ def process_epitope(
         prefix,
     )
 
-    sample_labels = np.asarray(labels[: len(sample_ids)], dtype=np.int32)
-    viz_filename = (
-        f"{sanitize_filename_token(args.species)}_"
-        f"{sanitize_filename_token(epitope)}_"
-        f"{sanitize_filename_token(chain)}.html"
-    )
-    save_cluster_plot_html(
-        epitope=epitope,
-        chain=chain,
-        sample_reps=sample_reps,
-        sample_ids=sample_ids,
-        sample_labels=sample_labels,
-        significant_cluster_ids=artifacts.significant_cluster_ids,
-        summary_df=artifacts.summary_df,
-        sample_umap=sample_umap,
-        bg_umap=bg_umap,
-        output_path=paths.viz_dir / viz_filename,
-    )
+    if not args.skip_umap:
+        sample_labels = np.asarray(labels[: len(sample_ids)], dtype=np.int32)
+        viz_filename = (
+            f"{sanitize_filename_token(args.species)}_"
+            f"{sanitize_filename_token(epitope)}_"
+            f"{sanitize_filename_token(chain)}.html"
+        )
+        save_cluster_plot_html(
+            epitope=epitope,
+            chain=chain,
+            sample_reps=sample_reps,
+            sample_ids=sample_ids,
+            sample_labels=sample_labels,
+            significant_cluster_ids=artifacts.significant_cluster_ids,
+            summary_df=artifacts.summary_df,
+            sample_umap=sample_umap,
+            bg_umap=bg_umap,
+            output_path=paths.viz_dir / viz_filename,
+        )
 
     logging.info(
         "Done %s: clustered_sample points=%d/%d, clusters=%d; enriched points=%d, clusters=%d",
@@ -709,16 +710,33 @@ def main():
             paths=paths,
         )
 
-        epitope_inputs, bg_umap = _stage_prepare_joint_umap(
-            epitope_infos,
-            args=args,
-            lib=lib,
-            locus=locus,
-            paths=paths,
-            transform=transform,
-            bg_pca=bg_pca,
-            transform_path=transform_path,
-        )
+        if args.skip_umap:
+            logging.info("Skipping Stage 3/4 joint plotting UMAP because --skip-umap was requested")
+            epitope_inputs = []
+            for epitope_info in epitope_infos:
+                epitope_data = _load_epitope_input(
+                    epitope_info,
+                    args=args,
+                    lib=lib,
+                    locus=locus,
+                    paths=paths,
+                )
+                sample_pca = transform.transform_pca(epitope_data["sample_emb"])
+                epitope_data["sample_pca"] = sample_pca
+                epitope_inputs.append(epitope_data)
+                del epitope_data["sample_emb"]
+            bg_umap = None
+        else:
+            epitope_inputs, bg_umap = _stage_prepare_joint_umap(
+                epitope_infos,
+                args=args,
+                lib=lib,
+                locus=locus,
+                paths=paths,
+                transform=transform,
+                bg_pca=bg_pca,
+                transform_path=transform_path,
+            )
 
         clustered_tables, cluster_members_tables = _stage_run_per_epitope_analysis(
             epitope_inputs,
