@@ -8,10 +8,13 @@ REDCEA_VDJDB="${REDCEA_VDJDB:-vdjdb_release/vdjdb.slim.txt}"
 REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
 REDCEA_NPROC="${REDCEA_NPROC:-8}"
 REDCEA_CHAIN="${REDCEA_CHAIN:-TRB}"
-REDCEA_OUTPUT="${REDCEA_OUTPUT:-results/redcea_ylq}"
-REDCEA_EPITOPE="${REDCEA_EPITOPE:-YLQPRTFLL}"
+REDCEA_OUTPUT="${REDCEA_OUTPUT:-results/redcea_ylq_glc}"
+REDCEA_EPITOPES="${REDCEA_EPITOPES:-${REDCEA_EPITOPE:-GLCTLVAML YLQPRTFLL}}"
 REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-1}"
 REDCEA_SKIP_UMAP="${REDCEA_SKIP_UMAP:-1}"
+REDCEA_K_NEIGHBORS="${REDCEA_K_NEIGHBORS:-15}"
+REDCEA_LEIDEN_RESOLUTION="${REDCEA_LEIDEN_RESOLUTION:-1.0}"
+REDCEA_OUTPUT_TAG="${REDCEA_OUTPUT_TAG:-}"
 
 # Plotting UMAP defaults are kept for compatibility, but can be skipped entirely
 # with REDCEA_SKIP_UMAP=1 for fast tuning runs.
@@ -84,6 +87,12 @@ run_chain() {
     extra_args+=(--skip-umap)
   fi
 
+  read -r -a epitope_args <<< "$REDCEA_EPITOPES"
+  local output_tag="$REDCEA_OUTPUT_TAG"
+  if [[ -z "$output_tag" ]]; then
+    output_tag="k${REDCEA_K_NEIGHBORS}_res${REDCEA_LEIDEN_RESOLUTION//./p}"
+  fi
+
   python -u -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \
     --vdjdb "$REDCEA_VDJDB" \
     --background-airr "$bg_airr" \
@@ -91,8 +100,11 @@ run_chain() {
     --output "$output_dir" \
     --chain "$chain" \
     --species "$REDCEA_SPECIES" \
-    --epitopes "$REDCEA_EPITOPE" \
+    --epitopes "${epitope_args[@]}" \
     --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
+    --k-neighbors "$REDCEA_K_NEIGHBORS" \
+    --leiden-resolution "$REDCEA_LEIDEN_RESOLUTION" \
+    --output-tag "$output_tag" \
     --umap-n-neighbors "$umap_n_neighbors" \
     --umap-min-dist "$umap_min_dist" \
     --nproc "$REDCEA_NPROC" \

@@ -83,6 +83,28 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         action="store_true",
         help="Skip joint plotting UMAP and HTML export. Useful for fast clustering parameter tuning.",
     )
+    parser.add_argument(
+        "--k-neighbors",
+        dest="k_neighbors",
+        type=int,
+        default=15,
+        help="Number of nearest neighbors for the joint sample/background clustering graph.",
+    )
+    parser.add_argument(
+        "--leiden-resolution",
+        dest="leiden_resolution",
+        type=float,
+        default=1.0,
+        help="Leiden clustering resolution. Larger values usually produce more/smaller clusters.",
+    )
+    parser.add_argument(
+        "--output-tag",
+        default=None,
+        help=(
+            "Optional suffix for the final cluster_members file, for example "
+            "'k15_res1p0' writes cluster_members_TRB_k15_res1p0.txt."
+        ),
+    )
     parser.add_argument("--nproc", type=int, default=1, help="Number of worker threads/processes.")
     parser.set_defaults(
         prefix=None,
@@ -94,10 +116,8 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         lower_len_cdr3=None,
         higher_len_cdr3=None,
         cluster_algo="leiden",
-        k_neighbors=15,
         cluster_min_samples=5,
         eps_k_neighbors=4,
-        leiden_resolution=1.0,
         leiden_sub_resolution=1.0,
         eps_estimation_based_on="sample",
         vdbscan_sym_rule="asymmetric",

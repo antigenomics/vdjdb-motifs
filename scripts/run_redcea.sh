@@ -9,6 +9,8 @@ REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
 REDCEA_NPROC="${REDCEA_NPROC:-8}"
 REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-100}"
 REDCEA_CHAIN="${REDCEA_CHAIN:-both}"
+REDCEA_K_NEIGHBORS="${REDCEA_K_NEIGHBORS:-15}"
+REDCEA_LEIDEN_RESOLUTION="${REDCEA_LEIDEN_RESOLUTION:-1.0}"
 
 # Plotting UMAP defaults can differ per chain. If a global REDCEA_UMAP_* override
 # is set in the environment, it still wins over the chain-specific defaults.
@@ -104,6 +106,8 @@ run_chain() {
     --chain "$chain" \
     --species "$REDCEA_SPECIES" \
     --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
+    --k-neighbors "$REDCEA_K_NEIGHBORS" \
+    --leiden-resolution "$REDCEA_LEIDEN_RESOLUTION" \
     --umap-n-neighbors "$umap_n_neighbors" \
     --umap-min-dist "$umap_min_dist" \
     --nproc "$REDCEA_NPROC"

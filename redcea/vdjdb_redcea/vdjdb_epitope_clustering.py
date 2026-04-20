@@ -58,6 +58,15 @@ def _normalize_vdjdb_columns(vdjdb_df: pd.DataFrame, chain: str) -> pd.DataFrame
     return normalized
 
 
+def _cluster_members_filename(chain: str, output_tag: str | None) -> str:
+    if output_tag is None:
+        return f"cluster_members_{chain}.txt"
+    clean_tag = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in output_tag).strip("_")
+    if not clean_tag:
+        return f"cluster_members_{chain}.txt"
+    return f"cluster_members_{chain}_{clean_tag}.txt"
+
+
 def resolve_joint_knn(
     sample_pca: np.ndarray,
     bg_pca: np.ndarray,
@@ -758,7 +767,7 @@ def main():
             )
         if cluster_members_tables:
             pd.concat(cluster_members_tables, ignore_index=True).to_csv(
-                output_root / f"cluster_members_{args.chain}.txt", sep="\t", index=False
+                output_root / _cluster_members_filename(args.chain, args.output_tag), sep="\t", index=False
             )
         del clustered_tables, cluster_members_tables, bg_pca, bg_reps, bg_ids
         gc.collect()
