@@ -260,6 +260,23 @@ def build_sample_members_table(
         )
         sample_cluster_df = sample_cluster_df.merge(umap_df, on="clone_id", how="left")
 
+    coordinate_cols = ["v.end", "j.start"]
+    if all(col in epitope_df.columns for col in coordinate_cols):
+        coordinate_lookup = (
+            epitope_df[[cfg["cdr3"], cfg["v"], cfg["j"], *coordinate_cols]]
+            .drop_duplicates(subset=[cfg["cdr3"], cfg["v"], cfg["j"]])
+            .copy()
+        )
+        sample_cluster_df = sample_cluster_df.merge(
+            coordinate_lookup,
+            left_on=[cdr3_col, v_col, j_col],
+            right_on=[cfg["cdr3"], cfg["v"], cfg["j"]],
+            how="left",
+        )
+    else:
+        sample_cluster_df["v.end"] = pd.NA
+        sample_cluster_df["j.start"] = pd.NA
+
     return pd.DataFrame(
         {
             "species": meta["species"],
@@ -277,8 +294,8 @@ def build_sample_members_table(
             "csz": [int(cluster_sizes[int(cid)]) for cid in sample_cluster_df["cluster_id"].values],
             "v.segm": sample_cluster_df[v_col].values,
             "j.segm": sample_cluster_df[j_col].values,
-            "v.end": pd.NA,
-            "j.start": pd.NA,
+            "v.end": sample_cluster_df["v.end"].values,
+            "j.start": sample_cluster_df["j.start"].values,
             "v.segm.repr": sample_cluster_df[v_col].values,
             "j.segm.repr": sample_cluster_df[j_col].values,
         }
