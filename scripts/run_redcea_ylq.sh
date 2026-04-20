@@ -15,6 +15,7 @@ REDCEA_SKIP_UMAP="${REDCEA_SKIP_UMAP:-1}"
 REDCEA_K_NEIGHBORS="${REDCEA_K_NEIGHBORS:-15}"
 REDCEA_LEIDEN_RESOLUTION="${REDCEA_LEIDEN_RESOLUTION:-1.0}"
 REDCEA_OUTPUT_TAG="${REDCEA_OUTPUT_TAG:-}"
+REDCEA_TCREMP_CACHE_DIR="${REDCEA_TCREMP_CACHE_DIR:-}"
 
 # Plotting UMAP defaults are kept for compatibility, but can be skipped entirely
 # with REDCEA_SKIP_UMAP=1 for fast tuning runs.
@@ -91,6 +92,9 @@ run_chain() {
   local output_tag="$REDCEA_OUTPUT_TAG"
   if [[ -z "$output_tag" ]]; then
     output_tag="k${REDCEA_K_NEIGHBORS}_res${REDCEA_LEIDEN_RESOLUTION//./p}"
+  fi
+  if [[ -n "$REDCEA_TCREMP_CACHE_DIR" ]]; then
+    extra_args+=(--tcremp-cache-dir "$REDCEA_TCREMP_CACHE_DIR")
   fi
 
   python -u -m vdjdb_redcea.vdjdb_clusters_launch_with_transform \

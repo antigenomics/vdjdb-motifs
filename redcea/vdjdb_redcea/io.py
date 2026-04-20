@@ -43,7 +43,7 @@ def build_airr_from_epitope(ep_df: pd.DataFrame, chain: str) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
-def prepare_output_dirs(output_root: Path) -> OutputPaths:
+def prepare_output_dirs(output_root: Path, tcremp_cache_dir: Path | None = None) -> OutputPaths:
     """Prepare output directories and return OutputPaths object.
 
     Args:
@@ -56,7 +56,7 @@ def prepare_output_dirs(output_root: Path) -> OutputPaths:
         output_root=output_root,
         viz_dir=output_root / "viz",
         airr_dir=output_root / "airr_format",
-        tcremp_dir=output_root / "tcremp",
+        tcremp_dir=tcremp_cache_dir or output_root / "tcremp",
         tcrempnet_dir=output_root / "tcrempnet",
     )
     for path in (paths.viz_dir, paths.airr_dir, paths.tcremp_dir, paths.tcrempnet_dir):
@@ -74,7 +74,8 @@ def get_background_transform_path(*, args, output_root: Path) -> Path:
     Returns:
         Path to the background transform file.
     """
-    default_path = output_root / "tcremp" / f"{args.chain.lower()}_background_transform.joblib"
+    tcremp_dir = Path(args.tcremp_cache_dir) if getattr(args, "tcremp_cache_dir", None) else output_root / "tcremp"
+    default_path = tcremp_dir / f"{args.chain.lower()}_background_transform.joblib"
     return Path(getattr(args, "background_transform", None) or default_path)
 
 

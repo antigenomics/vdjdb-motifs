@@ -25,6 +25,14 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         help="Path to precomputed background embeddings parquet.",
     )
     parser.add_argument("--output", required=True, help="Output directory root.")
+    parser.add_argument(
+        "--tcremp-cache-dir",
+        default=None,
+        help=(
+            "Optional directory with precomputed TCRemP embeddings/transforms. "
+            "When set, sample/background embeddings are loaded from this directory instead of OUTPUT/tcremp."
+        ),
+    )
     parser.add_argument("--chain", required=True, choices=sorted(CHAIN_COLS), help="TCR chain to analyze.")
     parser.add_argument("--species", default="HomoSapiens", help="Species name understood by SegmentLibrary.")
     parser.add_argument(

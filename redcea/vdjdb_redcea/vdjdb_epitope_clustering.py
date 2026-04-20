@@ -633,7 +633,8 @@ def main():
         args = get_arguments_vdjdb_clusters()
 
         output_root = prepare_output_path(args.output)
-        paths = prepare_output_dirs(output_root)
+        tcremp_cache_dir = Path(args.tcremp_cache_dir).resolve() if args.tcremp_cache_dir else None
+        paths = prepare_output_dirs(output_root, tcremp_cache_dir=tcremp_cache_dir)
 
         configure_logging(Path(args.vdjdb), output_root, f"{args.chain.lower()}_vdjdb_clusters")
         import faiss
