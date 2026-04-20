@@ -106,6 +106,13 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         help="Leiden clustering resolution. Larger values usually produce more/smaller clusters.",
     )
     parser.add_argument(
+        "--cluster-min-samples",
+        dest="cluster_min_samples",
+        type=int,
+        default=5,
+        help="Minimum number of sample clonotypes required for a Leiden cluster to be retained.",
+    )
+    parser.add_argument(
         "--output-tag",
         default=None,
         help=(
@@ -124,7 +131,6 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         lower_len_cdr3=None,
         higher_len_cdr3=None,
         cluster_algo="leiden",
-        cluster_min_samples=5,
         eps_k_neighbors=4,
         leiden_sub_resolution=1.0,
         eps_estimation_based_on="sample",

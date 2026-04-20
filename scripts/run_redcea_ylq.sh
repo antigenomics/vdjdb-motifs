@@ -14,6 +14,7 @@ REDCEA_MIN_EPITOPE_CLONOTYPES="${REDCEA_MIN_EPITOPE_CLONOTYPES:-1}"
 REDCEA_SKIP_UMAP="${REDCEA_SKIP_UMAP:-1}"
 REDCEA_K_NEIGHBORS="${REDCEA_K_NEIGHBORS:-15}"
 REDCEA_LEIDEN_RESOLUTION="${REDCEA_LEIDEN_RESOLUTION:-1.0}"
+REDCEA_CLUSTER_MIN_SAMPLES="${REDCEA_CLUSTER_MIN_SAMPLES:-5}"
 REDCEA_OUTPUT_TAG="${REDCEA_OUTPUT_TAG:-}"
 REDCEA_TCREMP_CACHE_DIR="${REDCEA_TCREMP_CACHE_DIR:-}"
 
@@ -91,7 +92,7 @@ run_chain() {
   read -r -a epitope_args <<< "$REDCEA_EPITOPES"
   local output_tag="$REDCEA_OUTPUT_TAG"
   if [[ -z "$output_tag" ]]; then
-    output_tag="k${REDCEA_K_NEIGHBORS}_res${REDCEA_LEIDEN_RESOLUTION//./p}"
+    output_tag="k${REDCEA_K_NEIGHBORS}_res${REDCEA_LEIDEN_RESOLUTION//./p}_min${REDCEA_CLUSTER_MIN_SAMPLES}"
   fi
   if [[ -n "$REDCEA_TCREMP_CACHE_DIR" ]]; then
     extra_args+=(--tcremp-cache-dir "$REDCEA_TCREMP_CACHE_DIR")
@@ -108,6 +109,7 @@ run_chain() {
     --min-epitope-clonotypes "$REDCEA_MIN_EPITOPE_CLONOTYPES" \
     --k-neighbors "$REDCEA_K_NEIGHBORS" \
     --leiden-resolution "$REDCEA_LEIDEN_RESOLUTION" \
+    --cluster-min-samples "$REDCEA_CLUSTER_MIN_SAMPLES" \
     --output-tag "$output_tag" \
     --umap-n-neighbors "$umap_n_neighbors" \
     --umap-min-dist "$umap_min_dist" \
