@@ -245,7 +245,10 @@ def build_sample_members_table(
     j_col = f"j_{cfg['gene']}"
 
     meta = epitope_df.iloc[0]
-    cluster_sizes = summary_df.set_index("cluster_id")["cluster_size"].to_dict()
+    # ``cluster_members`` contains only sample clonotypes, so keep ``csz``
+    # aligned with the exported rows rather than the joint sample+background
+    # summary size.
+    cluster_sizes = summary_df.set_index("cluster_id")["sample"].to_dict()
     chain_tag = "A" if chain == "TRA" else "B"
     sample_cluster_df = sample_cluster_df.copy()
     if sample_umap is None:

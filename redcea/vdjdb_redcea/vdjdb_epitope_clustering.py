@@ -58,13 +58,13 @@ def _normalize_vdjdb_columns(vdjdb_df: pd.DataFrame, chain: str) -> pd.DataFrame
     return normalized
 
 
-def _cluster_members_filename(chain: str, output_tag: str | None) -> str:
+def _cluster_members_filename(chain: str, output_tag: str | None, *, prefix: str = "cluster_members") -> str:
     if output_tag is None:
-        return f"cluster_members_{chain}.txt"
+        return f"{prefix}_{chain}.txt"
     clean_tag = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in output_tag).strip("_")
     if not clean_tag:
-        return f"cluster_members_{chain}.txt"
-    return f"cluster_members_{chain}_{clean_tag}.txt"
+        return f"{prefix}_{chain}.txt"
+    return f"{prefix}_{chain}_{clean_tag}.txt"
 
 
 def resolve_joint_knn(
@@ -407,13 +407,14 @@ def _stage_run_per_epitope_analysis(
     bg_ids: pd.Series,
     bg_index_path: Path,
     bg_umap,
-) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
+) -> tuple[list[pd.DataFrame], list[pd.DataFrame], list[pd.DataFrame]]:
     """Stage 4: run per-epitope clustering and save outputs."""
     logging.info("Stage 4/4: running per-epitope clustering analysis")
     clustered_tables: list[pd.DataFrame] = []
     cluster_members_tables: list[pd.DataFrame] = []
+    all_cluster_members_tables: list[pd.DataFrame] = []
     for epitope_data in epitope_inputs:
-        clustered_df, cluster_members_df = process_epitope(
+        clustered_df, cluster_members_df, all_cluster_members_df = process_epitope(
             epitope_data,
             args=args,
             paths=paths,
@@ -425,8 +426,9 @@ def _stage_run_per_epitope_analysis(
         )
         clustered_tables.append(clustered_df)
         cluster_members_tables.append(cluster_members_df)
+        all_cluster_members_tables.append(all_cluster_members_df)
     logging.info("Stage 4/4 done")
-    return clustered_tables, cluster_members_tables
+    return clustered_tables, cluster_members_tables, all_cluster_members_tables
 
 
 def _compute_summary_and_significance(summary_df: pd.DataFrame, sample_ids: pd.Series, bg_ids: pd.Series):
@@ -521,7 +523,7 @@ def process_epitope(
     bg_ids: pd.Series,
     bg_index_path: Path,
     bg_umap,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Process a single epitope for clustering.
 
     Args:
@@ -569,6 +571,15 @@ def process_epitope(
     cluster_members_df = build_sample_members_table(
         artifacts.enriched_sample_cluster_df, artifacts.summary_df, chain, ep_df, epitope, sample_ids, sample_umap
     )
+    lfc_positive_cluster_ids = set(
+        artifacts.summary_df.loc[artifacts.summary_df["log_fold_change"] > 0, "cluster_id"].astype(int)
+    )
+    lfc_positive_sample_cluster_df = artifacts.sample_cluster_df[
+        artifacts.sample_cluster_df["cluster_id"].isin(lfc_positive_cluster_ids)
+    ].copy()
+    all_cluster_members_df = build_sample_members_table(
+        lfc_positive_sample_cluster_df, artifacts.summary_df, chain, ep_df, epitope, sample_ids, sample_umap
+    )
 
     _save_cluster_results(
         artifacts.cluster_df,
@@ -612,7 +623,7 @@ def process_epitope(
     sample_cluster_df = artifacts.sample_cluster_df
     del sample_reps, sample_ids, sample_pca, sample_umap, labels, artifacts
     gc.collect()
-    return sample_cluster_df, cluster_members_df
+    return sample_cluster_df, cluster_members_df, all_cluster_members_df
 
 
 def main():
@@ -748,7 +759,7 @@ def main():
                 transform_path=transform_path,
             )
 
-        clustered_tables, cluster_members_tables = _stage_run_per_epitope_analysis(
+        clustered_tables, cluster_members_tables, all_cluster_members_tables = _stage_run_per_epitope_analysis(
             epitope_inputs,
             args=args,
             paths=paths,
@@ -770,7 +781,13 @@ def main():
             pd.concat(cluster_members_tables, ignore_index=True).to_csv(
                 output_root / _cluster_members_filename(args.chain, args.output_tag), sep="\t", index=False
             )
-        del clustered_tables, cluster_members_tables, bg_pca, bg_reps, bg_ids
+        if all_cluster_members_tables:
+            pd.concat(all_cluster_members_tables, ignore_index=True).to_csv(
+                output_root / _cluster_members_filename(args.chain, args.output_tag, prefix="cluster_members_all"),
+                sep="\t",
+                index=False,
+            )
+        del clustered_tables, cluster_members_tables, all_cluster_members_tables, bg_pca, bg_reps, bg_ids
         gc.collect()
 
         logging.info("Done")
