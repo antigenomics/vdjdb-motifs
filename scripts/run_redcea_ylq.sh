@@ -27,8 +27,17 @@ REDCEA_UMAP_MIN_DIST_TRB="${REDCEA_UMAP_MIN_DIST_TRB:-0.4}"
 
 TRA_BG_AIRR="${TRA_BG_AIRR:-redcea/data/backgrounds/tra_background_100k.tsv}"
 TRA_BG_EMBEDDING="${TRA_BG_EMBEDDING:-redcea/data/backgrounds/tra_background_embeddings.parquet}"
-TRB_BG_AIRR="${TRB_BG_AIRR:-redcea/data/backgrounds/trb_background_100k.tsv}"
-TRB_BG_EMBEDDING="${TRB_BG_EMBEDDING:-redcea/data/backgrounds/trb_background_embeddings.parquet}"
+REDCEA_PREPARE_VJ_BACKGROUND="${REDCEA_PREPARE_VJ_BACKGROUND:-1}"
+REDCEA_VJ_BACKGROUND_CHAIN="${REDCEA_VJ_BACKGROUND_CHAIN:-TRB}"
+REDCEA_VJ_BACKGROUND_SEED="${REDCEA_VJ_BACKGROUND_SEED:-42}"
+REDCEA_VJ_BACKGROUND_KEEP_ALLELES="${REDCEA_VJ_BACKGROUND_KEEP_ALLELES:-0}"
+REDCEA_VJ_BACKGROUND_ALLOW_SHORTFALL="${REDCEA_VJ_BACKGROUND_ALLOW_SHORTFALL:-0}"
+TRB_BG_SOURCE_AIRR="${TRB_BG_SOURCE_AIRR:-redcea/data/backgrounds/trb_background_100k.tsv}"
+TRB_BG_SOURCE_EMBEDDING="${TRB_BG_SOURCE_EMBEDDING:-redcea/data/backgrounds/trb_background_embeddings.parquet}"
+TRA_BG_SOURCE_AIRR="${TRA_BG_SOURCE_AIRR:-$TRA_BG_AIRR}"
+TRA_BG_SOURCE_EMBEDDING="${TRA_BG_SOURCE_EMBEDDING:-$TRA_BG_EMBEDDING}"
+TRB_BG_AIRR="${TRB_BG_AIRR:-$REDCEA_OUTPUT/backgrounds/trb_background_vj.tsv}"
+TRB_BG_EMBEDDING="${TRB_BG_EMBEDDING:-$REDCEA_OUTPUT/backgrounds/trb_background_vj_embeddings.parquet}"
 
 mkdir -p "$REDCEA_OUTPUT"
 
@@ -59,6 +68,69 @@ activate_redcea_env() {
 
   eval "$(conda shell.bash hook)"
   conda activate vdjdb-redcea
+}
+
+prepare_vj_background_if_needed() {
+  local requested_chain="$1"
+  local source_airr=""
+  local source_embedding=""
+  local output_airr=""
+  local output_embedding=""
+  local -a prep_args=()
+
+  if [[ "$REDCEA_PREPARE_VJ_BACKGROUND" != "1" ]]; then
+    return
+  fi
+
+  if [[ "$requested_chain" != "$REDCEA_VJ_BACKGROUND_CHAIN" ]]; then
+    return
+  fi
+
+  case "$REDCEA_VJ_BACKGROUND_CHAIN" in
+    TRA)
+      source_airr="$TRA_BG_SOURCE_AIRR"
+      source_embedding="$TRA_BG_SOURCE_EMBEDDING"
+      output_airr="$TRA_BG_AIRR"
+      output_embedding="$TRA_BG_EMBEDDING"
+      ;;
+    TRB)
+      source_airr="$TRB_BG_SOURCE_AIRR"
+      source_embedding="$TRB_BG_SOURCE_EMBEDDING"
+      output_airr="$TRB_BG_AIRR"
+      output_embedding="$TRB_BG_EMBEDDING"
+      ;;
+    *)
+      echo "Unsupported REDCEA_VJ_BACKGROUND_CHAIN value: $REDCEA_VJ_BACKGROUND_CHAIN (expected TRA or TRB)" >&2
+      exit 1
+      ;;
+  esac
+
+  require_path "$source_airr"
+  require_path "$source_embedding"
+
+  mkdir -p "$(dirname "$output_airr")"
+  mkdir -p "$(dirname "$output_embedding")"
+
+  prep_args=(
+    -u
+    -m
+    vdjdb_redcea.sample_beta_background_by_vj
+    --chain "$REDCEA_VJ_BACKGROUND_CHAIN"
+    --source "$source_airr"
+    --source-embedding "$source_embedding"
+    --target "$REDCEA_VDJDB"
+    --output "$output_airr"
+    --output-embedding "$output_embedding"
+    --seed "$REDCEA_VJ_BACKGROUND_SEED"
+  )
+  if [[ "$REDCEA_VJ_BACKGROUND_KEEP_ALLELES" == "1" ]]; then
+    prep_args+=(--keep-alleles)
+  fi
+  if [[ "$REDCEA_VJ_BACKGROUND_ALLOW_SHORTFALL" == "1" ]]; then
+    prep_args+=(--allow-shortfall)
+  fi
+
+  python "${prep_args[@]}"
 }
 
 run_chain() {
@@ -118,6 +190,7 @@ run_chain() {
 }
 
 activate_redcea_env
+prepare_vj_background_if_needed "$REDCEA_CHAIN"
 
 if [[ "$REDCEA_CHAIN" == "TRA" ]]; then
   require_path "$TRA_BG_AIRR"
