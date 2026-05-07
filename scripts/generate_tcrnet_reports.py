@@ -107,7 +107,7 @@ def build_payload(*, epitope: str, rows_same_group: list[dict[str, str]], rows_e
     traces: list[dict[str, object]] = []
     other_rows = [row for row in rows_same_group if row["antigen.epitope"] != epitope]
     if other_rows:
-        traces.append(build_trace("Other epitopes", other_rows, GRAY_COLOR, size=7, opacity=0.55))
+        traces.append(build_trace("Other TCRs", other_rows, GRAY_COLOR, size=7, opacity=0.55))
 
     clusters: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows_epitope:
@@ -118,13 +118,13 @@ def build_payload(*, epitope: str, rows_same_group: list[dict[str, str]], rows_e
     return {
         "traces": traces,
         "layout": {
-            "title": {"text": epitope},
+            "title": {"text": ""},
             "template": "plotly_white",
             "width": 1100,
             "height": 760,
             "hovermode": "closest",
             "legend": {"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
-            "margin": {"l": 40, "r": 20, "t": 60, "b": 40},
+            "margin": {"l": 40, "r": 20, "t": 30, "b": 40},
             "xaxis": {"title": "", "showgrid": False, "zeroline": False, "showticklabels": False},
             "yaxis": {"title": "", "showgrid": False, "zeroline": False, "showticklabels": False, "scaleanchor": "x", "scaleratio": 1},
         },
