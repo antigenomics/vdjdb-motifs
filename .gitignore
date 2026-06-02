@@ -19,6 +19,8 @@ results/*
 !results/redcea/.gitkeep
 figures/*
 !figures/.gitkeep
+!figures/tcrnet_tcrempnet_redcea_final_one_panel.png
+!figures/tcrnet_tcrempnet_redcea_final_one_panel.pdf
 
 redcea/.venv/
 redcea/output/
