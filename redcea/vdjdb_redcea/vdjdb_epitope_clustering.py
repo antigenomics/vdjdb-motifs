@@ -639,7 +639,7 @@ def main():
             resolve_prototype_file,
             subsample_repertoire,
         )
-        from .io import prepare_output_dirs
+        from .io import filter_canonical_cdr3_rows, prepare_output_dirs
 
         args = get_arguments_vdjdb_clusters()
 
@@ -659,6 +659,11 @@ def main():
         vdjdb_df = pd.read_csv(args.vdjdb, sep="\t")
         vdjdb_df = _normalize_vdjdb_columns(vdjdb_df, args.chain)
         chain_cfg = CHAIN_COLS[args.chain]
+        vdjdb_df = filter_canonical_cdr3_rows(
+            vdjdb_df,
+            chain_cfg["cdr3"],
+            context=f"pipeline input ({args.chain})",
+        )
         required_cols = ["antigen.epitope", chain_cfg["cdr3"]]
         before_chain_cleanup = len(vdjdb_df)
         vdjdb_df = vdjdb_df.dropna(subset=required_cols).copy()

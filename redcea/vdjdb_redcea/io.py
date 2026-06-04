@@ -10,6 +10,36 @@ from .compat import BackgroundTransform
 from .config import CHAIN_COLS, OutputPaths
 
 
+def is_canonical_cdr3(value: object) -> bool:
+    """Return True for canonical CDR3 amino-acid sequences.
+
+    Canonical here means the sequence starts with ``C`` and ends with ``F`` or
+    ``W``.
+    """
+    if pd.isna(value):
+        return False
+    sequence = str(value).strip().upper()
+    return bool(sequence) and sequence.startswith("C") and sequence.endswith(("F", "W"))
+
+
+def filter_canonical_cdr3_rows(df: pd.DataFrame, cdr3_col: str, *, context: str) -> pd.DataFrame:
+    """Filter a table down to canonical CDR3 rows and log the effect."""
+    before = len(df)
+    filtered = df[df[cdr3_col].map(is_canonical_cdr3)].copy()
+    removed = before - len(filtered)
+    if removed:
+        logging.info(
+            "Filtered non-canonical CDR3 rows for %s using column %s: %d -> %d",
+            context,
+            cdr3_col,
+            before,
+            len(filtered),
+        )
+    else:
+        logging.info("No non-canonical CDR3 rows found for %s using column %s", context, cdr3_col)
+    return filtered
+
+
 def sanitize_filename_token(value: str) -> str:
     """Sanitize a string to be safe for use in filenames.
 
@@ -40,6 +70,7 @@ def build_airr_from_epitope(ep_df: pd.DataFrame, chain: str) -> pd.DataFrame:
     logging.info("Built AIRR table with %d rows for chain %s", len(out), chain)
     out.dropna(subset=["junction_aa"], inplace=True)
     logging.info("After dropping rows with missing CDR3, %d rows remain", len(out))
+    out = filter_canonical_cdr3_rows(out, "junction_aa", context=f"AIRR export ({chain})")
     return out.reset_index(drop=True)
 
 
