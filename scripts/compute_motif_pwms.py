@@ -142,6 +142,16 @@ def build_cluster_pwm(df: pd.DataFrame) -> pd.DataFrame:
     cluster_sizes = df.groupby("cid").size().rename("csz").reset_index().rename(columns={"cid": "_cid"})
     cluster_meta = cluster_meta.merge(cluster_sizes, on="_cid", how="left").rename(columns={"_cid": "cid"})
 
+    vj_by_len = (
+        df.assign(len=df["cdr3aa"].str.len())
+        .groupby(["cid", "len", "v.segm.repr", "j.segm.repr"], as_index=False)
+        .size()
+        .rename(columns={"size": "count.vj"})
+        .sort_values(["cid", "len", "count.vj"], ascending=[True, True, False])
+        .drop_duplicates(["cid", "len"])
+        .rename(columns={"v.segm.repr": "v.segm.repr.bg", "j.segm.repr": "j.segm.repr.bg"})
+    )
+
     seqs = df[["cid", "cdr3aa"]].drop_duplicates().copy()
     log(f"Expanding {len(seqs):,} unique cluster-member sequences into position rows")
     aa_rows: list[tuple[str, int, int, str]] = []
@@ -154,6 +164,8 @@ def build_cluster_pwm(df: pd.DataFrame) -> pd.DataFrame:
 
     counts = aa_df.groupby(["cid", "len", "pos", "aa"], as_index=False).size().rename(columns={"size": "count"})
     out = counts.merge(cluster_meta, on="cid", how="left")
+    out = out.rename(columns={"v.segm.repr": "v.segm.repr.orig", "j.segm.repr": "j.segm.repr.orig"})
+    out = out.merge(vj_by_len, on=["cid", "len"], how="left")
     log(
         "Built cluster PWM counts with "
         f"{len(out):,} rows in {time.perf_counter() - t0:.1f}s"
@@ -226,8 +238,8 @@ def compute_information(df: pd.DataFrame) -> pd.DataFrame:
         "gene",
         "cid",
         "csz",
-        "v.segm.repr",
-        "j.segm.repr",
+        "v.segm.repr.bg",
+        "j.segm.repr.bg",
         "pos",
         "len",
     ]
@@ -286,7 +298,8 @@ def main() -> None:
     t0 = time.perf_counter()
     merged = cluster_pwm.merge(
         bg_exact,
-        on=["species", "gene", "v.segm.repr", "j.segm.repr", "len", "pos", "aa"],
+        left_on=["species", "gene", "v.segm.repr.bg", "j.segm.repr.bg", "len", "pos", "aa"],
+        right_on=["species", "gene", "v.segm.repr", "j.segm.repr", "len", "pos", "aa"],
         how="left",
     ).merge(
         bg_imputed,
@@ -306,6 +319,14 @@ def main() -> None:
     log(f"{len(merged):,} merged rows remain after exact-background filtering")
 
     pwm = compute_information(merged)
+    pwm = pwm.drop(columns=["v.segm.repr.bg", "j.segm.repr.bg", "count.vj"], errors="ignore")
+    pwm = pwm.rename(
+        columns={
+            "v.segm.repr.orig": "v.segm.repr",
+            "j.segm.repr.orig": "j.segm.repr",
+        }
+    )
+    pwm = pwm.loc[:, ~pwm.columns.duplicated()]
     pwm = pwm.sort_values(["species", "antigen.epitope", "gene", "cid", "len", "pos", "aa"]).copy()
     pwm = pwm[LEGACY_COLUMNS]
 
