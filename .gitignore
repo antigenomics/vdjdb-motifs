@@ -27,3 +27,4 @@ redcea/output/
 redcea/results/
 redcea/data/backgrounds/
 redcea/src/vdjdb_redcea/__pycache__/
+tcrnet/pwms/*.aa_cdr3_pwm.txt

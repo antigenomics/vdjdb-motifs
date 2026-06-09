@@ -34,6 +34,10 @@ TRA_BG_SOURCE_AIRR="${TRA_BG_SOURCE_AIRR:-$TRA_BG_AIRR}"
 TRA_BG_SOURCE_EMBEDDING="${TRA_BG_SOURCE_EMBEDDING:-$TRA_BG_EMBEDDING}"
 TRB_BG_AIRR="${TRB_BG_AIRR:-$REDCEA_OUTPUT/backgrounds/trb_background_vj.tsv}"
 TRB_BG_EMBEDDING="${TRB_BG_EMBEDDING:-$REDCEA_OUTPUT/backgrounds/trb_background_vj_embeddings.parquet}"
+MOTIF_PWM_HUMAN_TRA_BACKGROUND="${MOTIF_PWM_HUMAN_TRA_BACKGROUND:-tcrnet/pwms/human.tra.aa.aa_cdr3_pwm.txt}"
+MOTIF_PWM_HUMAN_TRB_BACKGROUND="${MOTIF_PWM_HUMAN_TRB_BACKGROUND:-tcrnet/pwms/human.trb.aa.aa_cdr3_pwm.txt}"
+MOTIF_PWM_MOUSE_TRA_BACKGROUND="${MOTIF_PWM_MOUSE_TRA_BACKGROUND:-tcrnet/pwms/mouse.tra.aa.aa_cdr3_pwm.txt}"
+MOTIF_PWM_MOUSE_TRB_BACKGROUND="${MOTIF_PWM_MOUSE_TRB_BACKGROUND:-tcrnet/pwms/mouse.trb.aa.aa_cdr3_pwm.txt}"
 
 mkdir -p "$REDCEA_OUTPUT"
 
@@ -202,4 +206,22 @@ else
 
   wait "$pid_tra"
   wait "$pid_trb"
+fi
+
+motif_cluster_inputs=()
+if [[ -f "$REDCEA_OUTPUT/cluster_members_TRA.txt" ]]; then
+  motif_cluster_inputs+=("$REDCEA_OUTPUT/cluster_members_TRA.txt")
+fi
+if [[ -f "$REDCEA_OUTPUT/cluster_members_TRB.txt" ]]; then
+  motif_cluster_inputs+=("$REDCEA_OUTPUT/cluster_members_TRB.txt")
+fi
+
+if [[ ${#motif_cluster_inputs[@]} -gt 0 ]]; then
+  python scripts/compute_motif_pwms.py \
+    --cluster-members "${motif_cluster_inputs[@]}" \
+    --background HomoSapiens TRA "$MOTIF_PWM_HUMAN_TRA_BACKGROUND" \
+    --background HomoSapiens TRB "$MOTIF_PWM_HUMAN_TRB_BACKGROUND" \
+    --background MusMusculus TRA "$MOTIF_PWM_MOUSE_TRA_BACKGROUND" \
+    --background MusMusculus TRB "$MOTIF_PWM_MOUSE_TRB_BACKGROUND" \
+    --output "$REDCEA_OUTPUT/motif_pwms.txt"
 fi
