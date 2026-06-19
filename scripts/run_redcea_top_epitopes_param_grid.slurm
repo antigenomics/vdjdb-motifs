@@ -12,9 +12,7 @@ set -euo pipefail
 ROOT_DIR="${ROOT_DIR:-/home/evlasova/vdjdb-motifs}"
 REDCEA_VDJDB="${REDCEA_VDJDB:-vdjdb_release/vdjdb.slim.txt}"
 REDCEA_SPECIES="${REDCEA_SPECIES:-HomoSapiens}"
-REDCEA_TOP_EPITOPES_N="${REDCEA_TOP_EPITOPES_N:-10}"
-REDCEA_TOP_EPITOPES_MIN_COUNT="${REDCEA_TOP_EPITOPES_MIN_COUNT:-1}"
-REDCEA_CHAINS="${REDCEA_CHAINS:-TRB}"
+REDCEA_EPITOPE_ROWS_FILE="${REDCEA_EPITOPE_ROWS_FILE:-}"
 REDCEA_OUTPUT_ROOT="${REDCEA_OUTPUT_ROOT:-results/redcea_vdbscan_leiden_top_epitope_grid}"
 REDCEA_TCREMP_CACHE_ROOT="${REDCEA_TCREMP_CACHE_ROOT:-results/redcea_vdbscan_leiden_top_epitope_grid_cache}"
 REDCEA_PREP_ROOT="${REDCEA_PREP_ROOT:-results/redcea_vdbscan_leiden_top_epitope_grid_prep}"
@@ -26,13 +24,12 @@ REDCEA_ENRICHMENT_TEST="${REDCEA_ENRICHMENT_TEST:-zbinom}"
 REDCEA_RANDOM_SEED="${REDCEA_RANDOM_SEED:-42}"
 REDCEA_DEBUG_SAVE_INTERMEDIATE="${REDCEA_DEBUG_SAVE_INTERMEDIATE:-0}"
 REDCEA_ADD_AUXILIARY_CLUSTER_METRICS="${REDCEA_ADD_AUXILIARY_CLUSTER_METRICS:-0}"
-REDCEA_VDBSCAN_LEIDEN_K_GRID="${REDCEA_VDBSCAN_LEIDEN_K_GRID:-5 8 12}"
-REDCEA_VDBSCAN_LEIDEN_EPS_K_GRID="${REDCEA_VDBSCAN_LEIDEN_EPS_K_GRID:-5 8 12}"
-REDCEA_VDBSCAN_LEIDEN_CORE_MIN_SAMPLES_GRID="${REDCEA_VDBSCAN_LEIDEN_CORE_MIN_SAMPLES_GRID:-2 3 5}"
-REDCEA_VDBSCAN_LEIDEN_RESOLUTION_GRID="${REDCEA_VDBSCAN_LEIDEN_RESOLUTION_GRID:-1.0 1.5 2.0}"
-REDCEA_VDBSCAN_LEIDEN_SUB_RESOLUTION_GRID="${REDCEA_VDBSCAN_LEIDEN_SUB_RESOLUTION_GRID:-1.0 1.5}"
-REDCEA_VDBSCAN_LEIDEN_EPS_MODE_GRID="${REDCEA_VDBSCAN_LEIDEN_EPS_MODE_GRID:-sample background all}"
-REDCEA_VDBSCAN_LEIDEN_SYM_RULE_GRID="${REDCEA_VDBSCAN_LEIDEN_SYM_RULE_GRID:-asymmetric min max}"
+REDCEA_VDBSCAN_LEIDEN_K_GRID="${REDCEA_VDBSCAN_LEIDEN_K_GRID:-4 8 12}"
+REDCEA_VDBSCAN_LEIDEN_EPS_K_GRID="${REDCEA_VDBSCAN_LEIDEN_EPS_K_GRID:-4 8 12}"
+REDCEA_VDBSCAN_LEIDEN_CORE_MIN_SAMPLES_GRID="${REDCEA_VDBSCAN_LEIDEN_CORE_MIN_SAMPLES_GRID:-3}"
+REDCEA_VDBSCAN_LEIDEN_RESOLUTION_GRID="${REDCEA_VDBSCAN_LEIDEN_RESOLUTION_GRID:-0.5 1.0 1.5}"
+REDCEA_VDBSCAN_LEIDEN_EPS_MODE_GRID="${REDCEA_VDBSCAN_LEIDEN_EPS_MODE_GRID:-sample all}"
+REDCEA_VDBSCAN_LEIDEN_SYM_RULE_GRID="${REDCEA_VDBSCAN_LEIDEN_SYM_RULE_GRID:-asymmetric min}"
 
 TRA_BG_AIRR="${TRA_BG_AIRR:-redcea/data/backgrounds/tra_background_100k.tsv}"
 TRA_BG_EMBEDDING="${TRA_BG_EMBEDDING:-redcea/data/backgrounds/tra_background_embeddings.parquet}"
@@ -51,12 +48,10 @@ TRB_BG_EMBEDDING="${TRB_BG_EMBEDDING:-$REDCEA_PREP_ROOT/backgrounds/trb_backgrou
 cd "$ROOT_DIR"
 mkdir -p logs
 
-read -r -a chains <<< "$REDCEA_CHAINS"
 read -r -a k_grid <<< "$REDCEA_VDBSCAN_LEIDEN_K_GRID"
 read -r -a eps_k_grid <<< "$REDCEA_VDBSCAN_LEIDEN_EPS_K_GRID"
 read -r -a min_samples_grid <<< "$REDCEA_VDBSCAN_LEIDEN_CORE_MIN_SAMPLES_GRID"
 read -r -a resolution_grid <<< "$REDCEA_VDBSCAN_LEIDEN_RESOLUTION_GRID"
-read -r -a sub_resolution_grid <<< "$REDCEA_VDBSCAN_LEIDEN_SUB_RESOLUTION_GRID"
 read -r -a eps_mode_grid <<< "$REDCEA_VDBSCAN_LEIDEN_EPS_MODE_GRID"
 read -r -a sym_rule_grid <<< "$REDCEA_VDBSCAN_LEIDEN_SYM_RULE_GRID"
 
@@ -185,24 +180,26 @@ sanitize_token() {
   fi
 }
 
-helper_args=(
-  --vdjdb "$REDCEA_VDJDB"
-  --chains "${chains[@]}"
-  --species "$REDCEA_SPECIES"
-  --top-n "$REDCEA_TOP_EPITOPES_N"
-  --min-count "$REDCEA_TOP_EPITOPES_MIN_COUNT"
-  --format tsv
-)
-if [[ "$REDCEA_INCLUDE_NONCANONICAL" == "1" ]]; then
-  helper_args+=(--include-noncanonical)
-fi
+load_epitope_rows() {
+  if [[ -n "$REDCEA_EPITOPE_ROWS_FILE" ]]; then
+    require_path "$REDCEA_EPITOPE_ROWS_FILE"
+    mapfile -t epitope_rows < "$REDCEA_EPITOPE_ROWS_FILE"
+    return
+  fi
 
-mapfile -t epitope_rows < <(
-  python scripts/select_top_vdjdb_epitopes.py "${helper_args[@]}" | tail -n +2
-)
+  mapfile -t epitope_rows <<'EOF'
+TRB	GILGFVFTL	5189
+TRB	NLVPMVATV	4613
+TRB	AVFDRKSDAK	1647
+TRB	ELAGIGILTV	1426
+TRB	RAKFKQLL	1378
+EOF
+}
+
+load_epitope_rows
 
 if [[ "${#epitope_rows[@]}" -eq 0 ]]; then
-  echo "No epitopes were selected from $REDCEA_VDJDB" >&2
+  echo "No epitopes were configured for the grid" >&2
   exit 1
 fi
 
@@ -211,10 +208,9 @@ n_k="${#k_grid[@]}"
 n_eps_k="${#eps_k_grid[@]}"
 n_min_samples="${#min_samples_grid[@]}"
 n_resolution="${#resolution_grid[@]}"
-n_sub_resolution="${#sub_resolution_grid[@]}"
 n_eps_mode="${#eps_mode_grid[@]}"
 n_sym_rule="${#sym_rule_grid[@]}"
-total_tasks=$((n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution * n_sub_resolution * n_eps_mode * n_sym_rule))
+total_tasks=$((n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution * n_eps_mode * n_sym_rule))
 task_id="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
 
 if (( task_id < 0 || task_id >= total_tasks )); then
@@ -227,9 +223,8 @@ k_index=$(((task_id / n_epitopes) % n_k))
 eps_k_index=$(((task_id / (n_epitopes * n_k)) % n_eps_k))
 min_samples_index=$(((task_id / (n_epitopes * n_k * n_eps_k)) % n_min_samples))
 resolution_index=$(((task_id / (n_epitopes * n_k * n_eps_k * n_min_samples)) % n_resolution))
-sub_resolution_index=$(((task_id / (n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution)) % n_sub_resolution))
-eps_mode_index=$(((task_id / (n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution * n_sub_resolution)) % n_eps_mode))
-sym_rule_index=$((task_id / (n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution * n_sub_resolution * n_eps_mode)))
+eps_mode_index=$(((task_id / (n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution)) % n_eps_mode))
+sym_rule_index=$((task_id / (n_epitopes * n_k * n_eps_k * n_min_samples * n_resolution * n_eps_mode)))
 
 row="${epitope_rows[$epitope_index]}"
 IFS=$'\t' read -r chain epitope epitope_count <<< "$row"
@@ -237,14 +232,12 @@ k_neighbors="${k_grid[$k_index]}"
 eps_k_neighbors="${eps_k_grid[$eps_k_index]}"
 core_min_samples="${min_samples_grid[$min_samples_index]}"
 leiden_resolution="${resolution_grid[$resolution_index]}"
-leiden_sub_resolution="${sub_resolution_grid[$sub_resolution_index]}"
 eps_mode="${eps_mode_grid[$eps_mode_index]}"
 sym_rule="${sym_rule_grid[$sym_rule_index]}"
 
 epitope_tag="$(sanitize_token "$epitope")"
 resolution_tag="${leiden_resolution//./p}"
-sub_resolution_tag="${leiden_sub_resolution//./p}"
-output_tag="vdbscan_leiden_k${k_neighbors}_ek${eps_k_neighbors}_res${resolution_tag}_sres${sub_resolution_tag}_min${core_min_samples}_eps${eps_mode}_sym${sym_rule}"
+output_tag="vdbscan_leiden_k${k_neighbors}_ek${eps_k_neighbors}_res${resolution_tag}_min${core_min_samples}_eps${eps_mode}_sym${sym_rule}"
 run_output_dir="${REDCEA_OUTPUT_ROOT}/${chain}/${epitope_tag}/${output_tag}"
 shared_cache_dir="${REDCEA_TCREMP_CACHE_ROOT}/${chain}/${epitope_tag}"
 prefix="${chain,,}_vdjdb_${epitope_tag}"
@@ -293,7 +286,7 @@ cmd=(
   --k-neighbors "$k_neighbors"
   --eps-k-neighbors "$eps_k_neighbors"
   --leiden-resolution "$leiden_resolution"
-  --leiden-sub-resolution "$leiden_sub_resolution"
+  --leiden-sub-resolution 1.0
   --eps-estimation-based-on "$eps_mode"
   --vdbscan-sym-rule "$sym_rule"
   --enrichment-test "$REDCEA_ENRICHMENT_TEST"
@@ -307,7 +300,7 @@ if [[ "$REDCEA_ADD_AUXILIARY_CLUSTER_METRICS" == "1" ]]; then
   cmd+=(--add-auxiliary-cluster-metrics)
 fi
 
-echo "Running task ${task_id}/${total_tasks}: chain=${chain}, epitope=${epitope}, count=${epitope_count}, k=${k_neighbors}, eps_k=${eps_k_neighbors}, min_samples=${core_min_samples}, res=${leiden_resolution}, sub_res=${leiden_sub_resolution}, eps_mode=${eps_mode}, sym_rule=${sym_rule}"
+echo "Running task ${task_id}/${total_tasks}: chain=${chain}, epitope=${epitope}, count=${epitope_count}, k=${k_neighbors}, eps_k=${eps_k_neighbors}, min_samples=${core_min_samples}, res=${leiden_resolution}, eps_mode=${eps_mode}, sym_rule=${sym_rule}"
 echo "Output dir: ${run_output_dir}"
 echo "Sample AIRR: ${sample_airr}"
 echo "Sample embedding cache: ${sample_embedding}"
@@ -325,7 +318,7 @@ k_neighbors	${k_neighbors}
 eps_k_neighbors	${eps_k_neighbors}
 core_min_samples	${core_min_samples}
 leiden_resolution	${leiden_resolution}
-leiden_sub_resolution	${leiden_sub_resolution}
+leiden_sub_resolution	1.0
 eps_estimation_based_on	${eps_mode}
 vdbscan_sym_rule	${sym_rule}
 cluster_algo	vdbscan_leiden
