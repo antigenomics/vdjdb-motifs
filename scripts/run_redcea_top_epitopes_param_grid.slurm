@@ -63,16 +63,6 @@ require_path() {
   fi
 }
 
-activate_redcea_env() {
-  if ! command -v conda >/dev/null 2>&1; then
-    echo "conda is required but was not found in PATH" >&2
-    exit 1
-  fi
-
-  eval "$(conda shell.bash hook)"
-  conda activate vdjdb-redcea
-}
-
 prepare_vj_background_if_needed() {
   local requested_chain="$1"
   local source_airr=""
@@ -245,7 +235,6 @@ sample_airr="${shared_cache_dir}/${prefix}.tsv"
 sample_embedding="${shared_cache_dir}/${prefix}_sample_embeddings.parquet"
 mkdir -p "$run_output_dir" "$shared_cache_dir" "$REDCEA_PREP_ROOT/backgrounds"
 
-activate_redcea_env
 prepare_vj_background_if_needed "$chain"
 
 IFS=$'\t' read -r background_airr background_embedding <<< "$(resolve_background_paths "$chain")"
