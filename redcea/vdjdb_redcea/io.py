@@ -53,6 +53,17 @@ def sanitize_filename_token(value: str) -> str:
     return safe.strip("._") or "unknown"
 
 
+def _pick_existing_column(df: pd.DataFrame, candidates: list[str], *, field_name: str, chain: str) -> str:
+    """Return the first column present in the frame from the provided candidates."""
+    for candidate in candidates:
+        if candidate in df.columns:
+            return candidate
+    raise KeyError(
+        f"Could not find a {field_name} column for processed AIRR export ({chain}). "
+        f"Tried: {candidates}. Available columns: {list(df.columns)}"
+    )
+
+
 def build_airr_from_epitope(ep_df: pd.DataFrame, chain: str) -> pd.DataFrame:
     """Build AIRR format table from epitope DataFrame for a given chain.
 
@@ -74,6 +85,56 @@ def build_airr_from_epitope(ep_df: pd.DataFrame, chain: str) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+def build_processed_airr_from_tcremp_representations(representations: pd.DataFrame, chain: str) -> pd.DataFrame:
+    """Build AIRR table from TCRemP-processed clonotype representations."""
+    cfg = CHAIN_COLS[chain]
+    gene = cfg["gene"]
+    cdr3_col = _pick_existing_column(
+        representations,
+        [
+            f"cdr3aa_{gene}",
+            f"cdr3_{gene}",
+            f"cdr3.{gene}",
+            "junction_aa",
+            "cdr3aa",
+            "cdr3",
+        ],
+        field_name="CDR3",
+        chain=chain,
+    )
+    v_col = _pick_existing_column(
+        representations,
+        [
+            f"v_{gene}",
+            f"v.{gene}",
+            "v_call",
+            "v.segm",
+            "v",
+        ],
+        field_name="V gene",
+        chain=chain,
+    )
+    j_col = _pick_existing_column(
+        representations,
+        [
+            f"j_{gene}",
+            f"j.{gene}",
+            "j_call",
+            "j.segm",
+            "j",
+        ],
+        field_name="J gene",
+        chain=chain,
+    )
+
+    out = representations[[cdr3_col, v_col, j_col]].copy()
+    out.columns = ["junction_aa", "v_call", "j_call"]
+    out["locus"] = cfg["locus"]
+    out.dropna(subset=["junction_aa", "v_call", "j_call"], inplace=True)
+    out = filter_canonical_cdr3_rows(out, "junction_aa", context=f"processed AIRR export ({chain})")
+    return out.reset_index(drop=True)
+
+
 def prepare_output_dirs(output_root: Path, tcremp_cache_dir: Path | None = None) -> OutputPaths:
     """Prepare output directories and return OutputPaths object.
 
@@ -87,10 +148,11 @@ def prepare_output_dirs(output_root: Path, tcremp_cache_dir: Path | None = None)
         output_root=output_root,
         viz_dir=output_root / "viz",
         airr_dir=output_root / "airr_format",
+        airr_processed_dir=output_root / "airr_format_processed",
         tcremp_dir=tcremp_cache_dir or output_root / "tcremp",
         tcrempnet_dir=output_root / "tcrempnet",
     )
-    for path in (paths.viz_dir, paths.airr_dir, paths.tcremp_dir, paths.tcrempnet_dir):
+    for path in (paths.viz_dir, paths.airr_dir, paths.airr_processed_dir, paths.tcremp_dir, paths.tcrempnet_dir):
         path.mkdir(parents=True, exist_ok=True)
     return paths
 

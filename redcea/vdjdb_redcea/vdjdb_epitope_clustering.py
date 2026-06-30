@@ -242,22 +242,34 @@ def _precompute_epitope_embeddings(
     paths,
 ) -> dict[str, object]:
     """Compute and persist per-epitope embeddings before analysis."""
-    from .io import build_airr_from_epitope
+    from .io import build_airr_from_epitope, build_processed_airr_from_tcremp_representations
 
     chain = args.chain
     prefix = f"{chain.lower()}_vdjdb_{epitope}"
     airr_path = paths.airr_dir / f"{prefix}.tsv"
+    processed_airr_path = paths.airr_processed_dir / f"{prefix}.tsv"
 
     logging.info("Preparing epitope %s with %d clonotypes", epitope, len(ep_df))
-    build_airr_from_epitope(ep_df, chain).to_csv(airr_path, sep="\t", index=False)
+    raw_airr_df = build_airr_from_epitope(ep_df, chain)
+    raw_airr_df.to_csv(airr_path, sep="\t", index=False)
     sample_artifacts = _compute_sample_embeddings(
         args, genes, locus, lib, proto, paths, chain, prefix, airr_path
+    )
+    processed_airr_df = build_processed_airr_from_tcremp_representations(sample_artifacts.representations, chain)
+    processed_airr_df.to_csv(processed_airr_path, sep="\t", index=False)
+    logging.info(
+        "Saved processed AIRR table for epitope %s: raw_rows=%d, tcremp_rows=%d, path=%s",
+        epitope,
+        len(raw_airr_df),
+        len(processed_airr_df),
+        processed_airr_path,
     )
     return {
         "epitope": epitope,
         "ep_df": ep_df,
         "prefix": prefix,
         "airr_path": airr_path,
+        "processed_airr_path": processed_airr_path,
         "sample_embedding_path": paths.tcremp_dir / f"{prefix}_sample_embeddings.parquet",
         "n_sample_rows": len(sample_artifacts.ids),
     }

@@ -17,5 +17,6 @@ class OutputPaths:
     output_root: Path
     viz_dir: Path
     airr_dir: Path
+    airr_processed_dir: Path
     tcremp_dir: Path
     tcrempnet_dir: Path
