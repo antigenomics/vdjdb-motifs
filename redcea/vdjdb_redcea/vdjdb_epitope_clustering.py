@@ -317,18 +317,63 @@ def _stage_precompute_epitope_embeddings(
     """Stage 1: compute and persist per-epitope embeddings."""
     logging.info("Stage 1/4: precomputing TCRemP embeddings for selected epitopes")
     epitope_infos: list[dict[str, object]] = []
+    failed_epitopes: list[dict[str, object]] = []
+    chain_lower = args.chain.lower()
     for epitope, ep_df in vdjdb_df.groupby("antigen.epitope", sort=True):
-        epitope_info = _precompute_epitope_embeddings(
-            epitope,
-            ep_df,
-            args=args,
-            genes=genes,
-            locus=locus,
-            lib=lib,
-            proto=proto,
-            paths=paths,
+        prefix = f"{chain_lower}_vdjdb_{epitope}"
+        airr_path = paths.airr_dir / f"{prefix}.tsv"
+        processed_airr_path = paths.airr_processed_dir / f"{prefix}.tsv"
+        try:
+            epitope_info = _precompute_epitope_embeddings(
+                epitope,
+                ep_df,
+                args=args,
+                genes=genes,
+                locus=locus,
+                lib=lib,
+                proto=proto,
+                paths=paths,
+            )
+            epitope_infos.append(epitope_info)
+        except Exception as exc:
+            logging.exception(
+                "Skipping epitope %s for chain %s after a preprocessing/embedding failure: %s",
+                epitope,
+                args.chain,
+                exc,
+            )
+            failed_epitopes.append(
+                {
+                    "epitope": epitope,
+                    "chain": args.chain,
+                    "n_input_rows": len(ep_df),
+                    "stage": "precompute_embeddings",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "airr_path": str(airr_path),
+                    "processed_airr_path": str(processed_airr_path),
+                }
+            )
+            continue
+
+    if failed_epitopes:
+        failed_path = paths.output_root / f"{chain_lower}_skipped_epitopes.tsv"
+        pd.DataFrame(failed_epitopes).to_csv(failed_path, sep="\t", index=False)
+        logging.warning(
+            "Skipped %d epitope(s) during Stage 1/4 for chain %s; wrote failure report to %s",
+            len(failed_epitopes),
+            args.chain,
+            failed_path,
         )
-        epitope_infos.append(epitope_info)
+
+    if not epitope_infos:
+        raise RuntimeError(
+            f"No epitopes could be prepared successfully for chain {args.chain}. "
+            f"See {paths.output_root / f'{chain_lower}_skipped_epitopes.tsv'} for failure details."
+            if failed_epitopes
+            else f"No epitopes could be prepared successfully for chain {args.chain}."
+        )
+
     logging.info("Stage 1/4 done: prepared %d epitope embedding files", len(epitope_infos))
     return epitope_infos
 
