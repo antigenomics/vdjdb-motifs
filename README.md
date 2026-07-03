@@ -120,3 +120,22 @@ UMAP tuning note:
 - REDCEA `cluster_members_TRA.txt` and `cluster_members_TRB.txt` are written directly into `results/redcea/`.
 - REDCEA uses `vdjdb_release/vdjdb.slim.txt` as the default VDJdb input table.
 - REDCEA respects `REDCEA_NPROC`; when `REDCEA_CHAIN=both`, `TRA` and `TRB` are still launched in parallel as separate jobs.
+
+## Possig Heatmaps
+
+For large-epitope `vdbscan_leiden` reruns that already contain per-run
+`run_metadata.tsv`, `*_summary_tcrempnet.tsv`, and
+`knn_sample_sample__*.distances.npy`, use:
+
+```bash
+python scripts/build_redcea_possig_heatmaps.py \
+  --runs-root <path-to-redcea_vdbscan_leiden_large_epitopes_rerun> \
+  --output-dir results/redcea_possig_heatmaps
+```
+
+This script computes the repo-native `redcea_possig_density_score` components
+and writes:
+
+- `run_level_metric_breakdown.tsv`
+- `redcea_possig_parameter_runs.tsv`
+- publication-style heatmaps in `png` / `pdf` / `svg`
