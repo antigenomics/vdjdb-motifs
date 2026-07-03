@@ -134,8 +134,16 @@ python scripts/build_redcea_possig_heatmaps.py \
 ```
 
 This script computes the repo-native `redcea_possig_density_score` components
-and writes:
+and by default derives `d_ref` from the current rerun itself via
+`median(d_epi)` across all discovered runs. If you need the original analytic
+mode from the reporting scripts, pass `--d-ref-mode glc_ylq --glc-knn ... --ylq-knn ...`.
+
+It writes:
 
 - `run_level_metric_breakdown.tsv`
 - `redcea_possig_parameter_runs.tsv`
+- `run_level_distances.tsv`
+- `epitope_distance_summary.tsv`
 - publication-style heatmaps in `png` / `pdf` / `svg`
+- `epitope_mean_distance_summary.{png,pdf,svg}`
+- per-epitope run-level `d_epi` histograms under `distance_histograms/`

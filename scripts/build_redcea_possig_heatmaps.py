@@ -41,7 +41,6 @@ def find_repo_root() -> Path:
 
 def parse_args() -> argparse.Namespace:
     root = find_repo_root()
-    default_tcrempnet_root = root.parent / "tcrempnet"
     parser = argparse.ArgumentParser(
         description=(
             "Compute repo-native redcea_possig_density_score from per-run summary tables "
@@ -63,14 +62,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--glc-knn",
         type=Path,
-        default=default_tcrempnet_root / "data" / "processed" / "nearest_neighbor_distance_inputs" / "glc_knn_sample_sample_k4_l2.distances.npy",
-        help="Reference GLC sample-sample kNN distance array used in d_ref.",
+        default=None,
+        help="Optional reference GLC sample-sample kNN distance array used in d_ref.",
     )
     parser.add_argument(
         "--ylq-knn",
         type=Path,
-        default=default_tcrempnet_root / "data" / "processed" / "nearest_neighbor_distance_inputs" / "ylq_knn_sample_sample_k15_l2.distances.npy",
-        help="Reference YLQ sample-sample kNN distance array used in d_ref.",
+        default=None,
+        help="Optional reference YLQ sample-sample kNN distance array used in d_ref.",
+    )
+    parser.add_argument(
+        "--d-ref-mode",
+        choices=["dataset_median", "dataset_mean", "glc_ylq"],
+        default="dataset_median",
+        help=(
+            "How to compute d_ref: median or mean of current-run d_epi values, "
+            "or the original GLC/YLQ reference mode."
+        ),
     )
     parser.add_argument(
         "--comparison-group",
@@ -136,6 +144,31 @@ def load_reference_distance(path: Path) -> float:
     if not path.exists():
         raise FileNotFoundError(f"Reference distance file not found: {path}")
     return float(np.median(np.load(path)))
+
+
+def resolve_reference_distance(
+    run_df: pd.DataFrame,
+    *,
+    d_ref_mode: str,
+    glc_knn: Path | None,
+    ylq_knn: Path | None,
+) -> tuple[float, str]:
+    d_epi_values = pd.to_numeric(run_df["d_epi"], errors="coerce").dropna()
+    if d_epi_values.empty:
+        raise RuntimeError("Could not compute d_ref because no valid d_epi values were collected.")
+
+    if d_ref_mode == "glc_ylq":
+        if glc_knn is None or ylq_knn is None:
+            raise ValueError("--glc-knn and --ylq-knn are required when --d-ref-mode glc_ylq is used.")
+        d_glc = load_reference_distance(glc_knn)
+        d_ylq = load_reference_distance(ylq_knn)
+        d_ref = (d_glc + d_ylq) / 2.0
+        return d_ref, f"glc_ylq (d_glc={d_glc:.6f}, d_ylq={d_ylq:.6f})"
+
+    if d_ref_mode == "dataset_mean":
+        return float(d_epi_values.mean()), "dataset_mean(d_epi)"
+
+    return float(d_epi_values.median()), "dataset_median(d_epi)"
 
 
 def possig_mask(summary_df: pd.DataFrame) -> pd.Series:
@@ -310,6 +343,29 @@ def summarize_parameter_heatmap(run_df: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values(sort_cols).reset_index(drop=True)
 
 
+def summarize_distances(run_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    run_distance_df = (
+        run_df.loc[:, ["chain", "epitope", "run_id", "parameter_label", "d_epi"]]
+        .sort_values(["chain", "epitope", "parameter_label", "run_id"])
+        .reset_index(drop=True)
+    )
+    epitope_distance_df = (
+        run_df.groupby(["chain", "epitope"], dropna=False)
+        .agg(
+            d_epi_mean=("d_epi", "mean"),
+            d_epi_median=("d_epi", "median"),
+            d_epi_std=("d_epi", "std"),
+            d_epi_min=("d_epi", "min"),
+            d_epi_max=("d_epi", "max"),
+            n_runs=("run_id", "size"),
+        )
+        .reset_index()
+        .sort_values(["chain", "epitope"])
+        .reset_index(drop=True)
+    )
+    return run_distance_df, epitope_distance_df
+
+
 def plot_chain_heatmap(summary_df: pd.DataFrame, *, chain: str, output_stem: Path) -> None:
     chain_df = summary_df.loc[summary_df["chain"].astype(str) == str(chain)].copy()
     if chain_df.empty:
@@ -386,37 +442,104 @@ def plot_chain_heatmap(summary_df: pd.DataFrame, *, chain: str, output_stem: Pat
     plt.close(fig)
 
 
+def plot_epitope_distance_histograms(run_df: pd.DataFrame, *, output_dir: Path) -> None:
+    distance_dir = output_dir / "distance_histograms"
+    distance_dir.mkdir(parents=True, exist_ok=True)
+
+    for (chain, epitope), group_df in run_df.groupby(["chain", "epitope"], sort=True):
+        values = pd.to_numeric(group_df["d_epi"], errors="coerce").dropna().to_numpy(dtype=float)
+        if values.size == 0:
+            continue
+
+        bins = min(12, max(5, int(np.ceil(np.sqrt(values.size)))))
+        fig, ax = plt.subplots(figsize=(6.5, 4.5), constrained_layout=True)
+        ax.hist(values, bins=bins, color="#4c78a8", edgecolor="white")
+        ax.axvline(values.mean(), color="#f58518", linestyle="--", linewidth=2, label=f"mean={values.mean():.3f}")
+        ax.axvline(np.median(values), color="#54a24b", linestyle="-.", linewidth=2, label=f"median={np.median(values):.3f}")
+        ax.set_xlabel("d_epi")
+        ax.set_ylabel("Run count")
+        ax.set_title(f"{chain} {epitope}: distribution of run-level d_epi")
+        ax.legend(frameon=False)
+
+        stem = distance_dir / f"{str(chain).lower()}_{epitope}_d_epi_hist"
+        fig.savefig(stem.with_suffix(".png"), dpi=220, bbox_inches="tight")
+        fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
+        plt.close(fig)
+
+
+def plot_epitope_distance_summary(epitope_distance_df: pd.DataFrame, *, output_dir: Path) -> None:
+    if epitope_distance_df.empty:
+        return
+
+    fig_height = max(5.0, 0.38 * len(epitope_distance_df) + 1.5)
+    fig, ax = plt.subplots(figsize=(9.0, fig_height), constrained_layout=True)
+    labels = [f"{row.chain}:{row.epitope}" for row in epitope_distance_df.itertuples(index=False)]
+    y = np.arange(len(epitope_distance_df))
+    means = epitope_distance_df["d_epi_mean"].to_numpy(dtype=float)
+    medians = epitope_distance_df["d_epi_median"].to_numpy(dtype=float)
+    stds = epitope_distance_df["d_epi_std"].fillna(0.0).to_numpy(dtype=float)
+
+    ax.barh(y, means, xerr=stds, color="#72b7b2", alpha=0.9, ecolor="#4c4c4c", capsize=3)
+    ax.scatter(medians, y, color="#e45756", s=26, zorder=3, label="median")
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("d_epi")
+    ax.set_title("Mean d_epi by epitope with run-to-run spread")
+    ax.legend(frameon=False)
+
+    stem = output_dir / "epitope_mean_distance_summary"
+    fig.savefig(stem.with_suffix(".png"), dpi=220, bbox_inches="tight")
+    fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
+    fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     args = parse_args()
     runs_root = args.runs_root.resolve()
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    d_glc = load_reference_distance(args.glc_knn)
-    d_ylq = load_reference_distance(args.ylq_knn)
-    d_ref = (d_glc + d_ylq) / 2.0
-
     run_df = collect_run_rows(runs_root)
+    d_ref, d_ref_source = resolve_reference_distance(
+        run_df,
+        d_ref_mode=args.d_ref_mode,
+        glc_knn=args.glc_knn.resolve() if args.glc_knn is not None else None,
+        ylq_knn=args.ylq_knn.resolve() if args.ylq_knn is not None else None,
+    )
     scored_df = append_repo_native_scores(run_df, comparison_group=args.comparison_group, d_ref=d_ref)
     summary_df = summarize_parameter_heatmap(scored_df)
+    run_distance_df, epitope_distance_df = summarize_distances(scored_df)
 
     run_level_path = output_dir / "run_level_metric_breakdown.tsv"
     summary_path = output_dir / "redcea_possig_parameter_runs.tsv"
+    run_distance_path = output_dir / "run_level_distances.tsv"
+    epitope_distance_path = output_dir / "epitope_distance_summary.tsv"
     scored_df.to_csv(run_level_path, sep="\t", index=False)
     summary_df.to_csv(summary_path, sep="\t", index=False)
+    run_distance_df.to_csv(run_distance_path, sep="\t", index=False)
+    epitope_distance_df.to_csv(epitope_distance_path, sep="\t", index=False)
 
     for chain in sorted(summary_df["chain"].astype(str).unique().tolist()):
         plot_chain_heatmap(summary_df, chain=chain, output_stem=output_dir / f"redcea_possig_density_score_{chain.lower()}")
+    plot_epitope_distance_histograms(scored_df, output_dir=output_dir)
+    plot_epitope_distance_summary(epitope_distance_df, output_dir=output_dir)
 
     print(f"Discovered {len(scored_df)} run(s) from {runs_root}")
-    print(f"Reference distances: d_glc={d_glc:.6f}, d_ylq={d_ylq:.6f}, d_ref={d_ref:.6f}")
+    print(f"Reference distance: d_ref={d_ref:.6f} from {d_ref_source}")
     print(f"Saved {run_level_path}")
     print(f"Saved {summary_path}")
+    print(f"Saved {run_distance_path}")
+    print(f"Saved {epitope_distance_path}")
     for chain in sorted(summary_df['chain'].astype(str).unique().tolist()):
         stem = output_dir / f"redcea_possig_density_score_{chain.lower()}"
         print(f"Saved {stem.with_suffix('.png')}")
         print(f"Saved {stem.with_suffix('.pdf')}")
         print(f"Saved {stem.with_suffix('.svg')}")
+    print(f"Saved {(output_dir / 'epitope_mean_distance_summary.png')}")
+    print(f"Saved {(output_dir / 'epitope_mean_distance_summary.pdf')}")
+    print(f"Saved {(output_dir / 'epitope_mean_distance_summary.svg')}")
+    print(f"Saved per-epitope histograms under {output_dir / 'distance_histograms'}")
 
 
 if __name__ == "__main__":
