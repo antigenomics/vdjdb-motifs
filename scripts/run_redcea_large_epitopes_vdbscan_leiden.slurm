@@ -34,7 +34,7 @@ REDCEA_SYM_RULE="${REDCEA_SYM_RULE:?REDCEA_SYM_RULE is required}"
 
 TRA_BG_AIRR="${TRA_BG_AIRR:-redcea/data/backgrounds/tra_background_100k.tsv}"
 TRA_BG_EMBEDDING="${TRA_BG_EMBEDDING:-redcea/data/backgrounds/tra_background_embeddings.parquet}"
-REDCEA_PREPARE_VJ_BACKGROUND="${REDCEA_PREPARE_VJ_BACKGROUND:-1}"
+REDCEA_PREPARE_VJ_BACKGROUND="${REDCEA_PREPARE_VJ_BACKGROUND:-0}"
 REDCEA_VJ_BACKGROUND_CHAIN="${REDCEA_VJ_BACKGROUND_CHAIN:-TRB}"
 REDCEA_VJ_BACKGROUND_SEED="${REDCEA_VJ_BACKGROUND_SEED:-42}"
 REDCEA_VJ_BACKGROUND_KEEP_ALLELES="${REDCEA_VJ_BACKGROUND_KEEP_ALLELES:-0}"
@@ -43,8 +43,8 @@ TRB_BG_SOURCE_AIRR="${TRB_BG_SOURCE_AIRR:-redcea/data/backgrounds/trb_background
 TRB_BG_SOURCE_EMBEDDING="${TRB_BG_SOURCE_EMBEDDING:-redcea/data/backgrounds/trb_background_embeddings.parquet}"
 TRA_BG_SOURCE_AIRR="${TRA_BG_SOURCE_AIRR:-$TRA_BG_AIRR}"
 TRA_BG_SOURCE_EMBEDDING="${TRA_BG_SOURCE_EMBEDDING:-$TRA_BG_EMBEDDING}"
-TRB_BG_AIRR="${TRB_BG_AIRR:-$REDCEA_PREP_ROOT/backgrounds/trb_background_vj.tsv}"
-TRB_BG_EMBEDDING="${TRB_BG_EMBEDDING:-$REDCEA_PREP_ROOT/backgrounds/trb_background_vj_embeddings.parquet}"
+TRB_BG_AIRR="${TRB_BG_AIRR:-$TRB_BG_SOURCE_AIRR}"
+TRB_BG_EMBEDDING="${TRB_BG_EMBEDDING:-$TRB_BG_SOURCE_EMBEDDING}"
 
 cd "$ROOT_DIR"
 mkdir -p logs
@@ -139,6 +139,22 @@ prepare_vj_background_if_needed() {
 
 resolve_background_paths() {
   local chain="$1"
+  if [[ "$REDCEA_PREPARE_VJ_BACKGROUND" != "1" ]]; then
+    case "$chain" in
+      TRA)
+        printf '%s\t%s\n' "$TRA_BG_SOURCE_AIRR" "$TRA_BG_SOURCE_EMBEDDING"
+        ;;
+      TRB)
+        printf '%s\t%s\n' "$TRB_BG_SOURCE_AIRR" "$TRB_BG_SOURCE_EMBEDDING"
+        ;;
+      *)
+        echo "Unsupported chain: $chain" >&2
+        exit 1
+        ;;
+    esac
+    return
+  fi
+
   case "$chain" in
     TRA)
       printf '%s\t%s\n' "$TRA_BG_AIRR" "$TRA_BG_EMBEDDING"
