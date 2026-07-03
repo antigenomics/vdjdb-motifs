@@ -144,6 +144,10 @@ It writes:
 - `redcea_possig_parameter_runs.tsv`
 - `run_level_distances.tsv`
 - `epitope_distance_summary.tsv`
+- `sample_clonotype_nn.tsv`
+- `possig_cluster_lfc.tsv`
+- `epitope_object_metric_summary.tsv`
 - publication-style heatmaps in `png` / `pdf` / `svg`
-- `epitope_mean_distance_summary.{png,pdf,svg}`
-- per-epitope run-level `d_epi` histograms under `distance_histograms/`
+- per-epitope diagnostic panels under `epitope_metric_panels/`, where:
+  - the left subplot is the sample-clonotype nearest-neighbor distance distribution
+  - the right subplot is the `log_fold_change` distribution over all positive-significant enriched clusters

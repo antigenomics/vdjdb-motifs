@@ -179,6 +179,25 @@ def possig_mask(summary_df: pd.DataFrame) -> pd.Series:
     )
 
 
+def infer_source_series(cluster_df: pd.DataFrame) -> pd.Series:
+    if "source" in cluster_df.columns:
+        return cluster_df["source"].astype(str)
+    if "clone_id" not in cluster_df.columns:
+        raise ValueError("Could not infer sample/background source because cluster table has neither source nor clone_id.")
+    clone_ids = cluster_df["clone_id"].astype(str)
+    return clone_ids.str.startswith("s_").map({True: "sample", False: "background"})
+
+
+def compute_first_nonself_neighbor_distance(knn_distances: np.ndarray, knn_indices: np.ndarray) -> np.ndarray:
+    n_points, _ = knn_indices.shape
+    row_ids = np.arange(n_points, dtype=np.int64)[:, None]
+    valid_mask = (knn_indices != row_ids) & np.isfinite(knn_distances)
+    filtered = np.where(valid_mask, knn_distances.astype(np.float64, copy=False), np.inf)
+    nearest = filtered.min(axis=1)
+    nearest[~np.isfinite(nearest)] = np.nan
+    return nearest.astype("float64", copy=False)
+
+
 def comparison_key(row: pd.Series, mode: str) -> tuple[str, ...]:
     if mode == "epitope":
         return (str(row["epitope"]),)
@@ -366,6 +385,171 @@ def summarize_distances(run_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
     return run_distance_df, epitope_distance_df
 
 
+def collect_clonotype_rows(runs_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    metadata_paths = sorted(runs_root.rglob("run_metadata.tsv"))
+    if not metadata_paths:
+        raise FileNotFoundError(f"No run_metadata.tsv files found under {runs_root}")
+
+    for metadata_path in metadata_paths:
+        run_dir = metadata_path.parent
+        metadata = read_metadata_tsv(metadata_path)
+        chain = metadata.get("chain") or run_dir.parent.parent.name
+        epitope = metadata.get("epitope") or run_dir.parent.name
+        combo_tag = metadata.get("output_tag") or run_dir.name
+        params = parse_combo_tag(combo_tag)
+
+        summary_path = locate_single_file(run_dir, f"*{SUMMARY_SUFFIX}")
+        clusters_path = locate_single_file(run_dir, "*_tcremp_clusters.tsv")
+        knn_distance_path = locate_single_file(run_dir, "knn_sample_sample__*.distances.npy")
+        knn_index_path = locate_single_file(run_dir, "knn_sample_sample__*.indices.npy")
+
+        summary_df = pd.read_csv(summary_path, sep="\t")
+        cluster_df = pd.read_csv(clusters_path, sep="\t")
+        cluster_df = cluster_df.copy()
+        cluster_df["source"] = infer_source_series(cluster_df)
+        sample_df = cluster_df.loc[cluster_df["source"].eq("sample")].reset_index(drop=True)
+
+        knn_distances = np.load(knn_distance_path)
+        knn_indices = np.load(knn_index_path)
+        if knn_distances.shape != knn_indices.shape:
+            raise ValueError(
+                f"Sample kNN indices/distances shape mismatch in {run_dir}: "
+                f"{knn_indices.shape} vs {knn_distances.shape}"
+            )
+        if knn_distances.shape[0] != len(sample_df):
+            raise ValueError(
+                f"Sample kNN row count {knn_distances.shape[0]} does not match sample cluster row count "
+                f"{len(sample_df)} in {run_dir}"
+            )
+
+        nearest_neighbor_distance = compute_first_nonself_neighbor_distance(knn_distances, knn_indices)
+        summary_augmented = summary_df.copy()
+        mask = possig_mask(summary_augmented)
+        summary_augmented["log_fold_change_possig"] = np.where(
+            mask,
+            pd.to_numeric(summary_augmented["log_fold_change"], errors="coerce"),
+            np.nan,
+        )
+        cluster_metric_df = summary_augmented.loc[
+            :,
+            [
+                "cluster_id",
+                "log_fold_change",
+                "log_fold_change_possig",
+                "enrichment_fdr_zbinom",
+                "sample",
+                "background",
+                "cluster_size",
+            ],
+        ].copy()
+        merged = sample_df.merge(cluster_metric_df, on="cluster_id", how="left")
+        merged["nearest_neighbor_distance"] = nearest_neighbor_distance
+
+        for row in merged.itertuples(index=False):
+            clonotype_id = getattr(row, "clone_id", None)
+            rows.append(
+                {
+                    "run_id": str(run_dir.relative_to(runs_root)).replace("\\", "/"),
+                    "run_dir": str(run_dir),
+                    "chain": str(chain),
+                    "epitope": str(epitope),
+                    "output_tag": combo_tag,
+                    "parameter_label": " | ".join(
+                        [
+                            f"k={int(params['param_k_neighbors'])}",
+                            f"ek={int(params['param_eps_k_neighbors'])}",
+                            f"res={params['param_leiden_resolution']:g}",
+                            f"min={int(params['param_cluster_min_samples'])}",
+                            f"eps={params['param_eps_estimation_based_on']}",
+                            f"sym={params['param_vdbscan_sym_rule']}",
+                        ]
+                    ),
+                    "clone_id": "" if clonotype_id is None else str(clonotype_id),
+                    "cluster_id": int(getattr(row, "cluster_id")),
+                    "nearest_neighbor_distance": float(getattr(row, "nearest_neighbor_distance")),
+                    "log_fold_change": float(getattr(row, "log_fold_change")) if pd.notna(getattr(row, "log_fold_change")) else np.nan,
+                    "log_fold_change_possig": float(getattr(row, "log_fold_change_possig")) if pd.notna(getattr(row, "log_fold_change_possig")) else np.nan,
+                    "enrichment_fdr_zbinom": float(getattr(row, "enrichment_fdr_zbinom")) if pd.notna(getattr(row, "enrichment_fdr_zbinom")) else np.nan,
+                    "cluster_sample": float(getattr(row, "sample")) if pd.notna(getattr(row, "sample")) else np.nan,
+                    "cluster_background": float(getattr(row, "background")) if pd.notna(getattr(row, "background")) else np.nan,
+                    "cluster_size": float(getattr(row, "cluster_size")) if pd.notna(getattr(row, "cluster_size")) else np.nan,
+                }
+            )
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        raise RuntimeError(f"No clonotype rows collected from {runs_root}")
+    return frame
+
+
+def collect_possig_cluster_rows(runs_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    metadata_paths = sorted(runs_root.rglob("run_metadata.tsv"))
+    if not metadata_paths:
+        raise FileNotFoundError(f"No run_metadata.tsv files found under {runs_root}")
+
+    for metadata_path in metadata_paths:
+        run_dir = metadata_path.parent
+        metadata = read_metadata_tsv(metadata_path)
+        chain = metadata.get("chain") or run_dir.parent.parent.name
+        epitope = metadata.get("epitope") or run_dir.parent.name
+        combo_tag = metadata.get("output_tag") or run_dir.name
+        params = parse_combo_tag(combo_tag)
+
+        summary_path = locate_single_file(run_dir, f"*{SUMMARY_SUFFIX}")
+        summary_df = pd.read_csv(summary_path, sep="\t")
+        mask = possig_mask(summary_df)
+        cluster_df = summary_df.loc[mask].copy()
+
+        for row in cluster_df.itertuples(index=False):
+            rows.append(
+                {
+                    "run_id": str(run_dir.relative_to(runs_root)).replace("\\", "/"),
+                    "run_dir": str(run_dir),
+                    "chain": str(chain),
+                    "epitope": str(epitope),
+                    "output_tag": combo_tag,
+                    "parameter_label": " | ".join(
+                        [
+                            f"k={int(params['param_k_neighbors'])}",
+                            f"ek={int(params['param_eps_k_neighbors'])}",
+                            f"res={params['param_leiden_resolution']:g}",
+                            f"min={int(params['param_cluster_min_samples'])}",
+                            f"eps={params['param_eps_estimation_based_on']}",
+                            f"sym={params['param_vdbscan_sym_rule']}",
+                        ]
+                    ),
+                    "cluster_id": int(getattr(row, "cluster_id")),
+                    "log_fold_change": float(getattr(row, "log_fold_change")),
+                    "enrichment_fdr_zbinom": float(getattr(row, "enrichment_fdr_zbinom")),
+                    "sample": float(getattr(row, "sample")) if pd.notna(getattr(row, "sample")) else np.nan,
+                    "background": float(getattr(row, "background")) if pd.notna(getattr(row, "background")) else np.nan,
+                    "cluster_size": float(getattr(row, "cluster_size")) if pd.notna(getattr(row, "cluster_size")) else np.nan,
+                }
+            )
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "run_id",
+                "run_dir",
+                "chain",
+                "epitope",
+                "output_tag",
+                "parameter_label",
+                "cluster_id",
+                "log_fold_change",
+                "enrichment_fdr_zbinom",
+                "sample",
+                "background",
+                "cluster_size",
+            ]
+        )
+    return frame
+
+
 def plot_chain_heatmap(summary_df: pd.DataFrame, *, chain: str, output_stem: Path) -> None:
     chain_df = summary_df.loc[summary_df["chain"].astype(str) == str(chain)].copy()
     if chain_df.empty:
@@ -442,56 +626,110 @@ def plot_chain_heatmap(summary_df: pd.DataFrame, *, chain: str, output_stem: Pat
     plt.close(fig)
 
 
-def plot_epitope_distance_histograms(run_df: pd.DataFrame, *, output_dir: Path) -> None:
-    distance_dir = output_dir / "distance_histograms"
-    distance_dir.mkdir(parents=True, exist_ok=True)
+def summarize_epitope_object_metrics(
+    clonotype_df: pd.DataFrame,
+    possig_cluster_df: pd.DataFrame,
+) -> pd.DataFrame:
+    nn_summary = (
+        clonotype_df.groupby(["chain", "epitope"], dropna=False)["nearest_neighbor_distance"]
+        .agg(["mean", "median", "std", "min", "max", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "mean": "nn_mean",
+                "median": "nn_median",
+                "std": "nn_std",
+                "min": "nn_min",
+                "max": "nn_max",
+                "count": "n_sample_clonotypes",
+            }
+        )
+    )
+    lfc_summary = (
+        possig_cluster_df.groupby(["chain", "epitope"], dropna=False)["log_fold_change"]
+        .agg(["mean", "median", "std", "min", "max", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "mean": "lfc_possig_mean",
+                "median": "lfc_possig_median",
+                "std": "lfc_possig_std",
+                "min": "lfc_possig_min",
+                "max": "lfc_possig_max",
+                "count": "n_possig_clusters",
+            }
+        )
+    )
+    return nn_summary.merge(lfc_summary, on=["chain", "epitope"], how="outer").sort_values(["chain", "epitope"]).reset_index(drop=True)
 
-    for (chain, epitope), group_df in run_df.groupby(["chain", "epitope"], sort=True):
-        values = pd.to_numeric(group_df["d_epi"], errors="coerce").dropna().to_numpy(dtype=float)
-        if values.size == 0:
+
+def plot_epitope_metric_panels(
+    clonotype_df: pd.DataFrame,
+    possig_cluster_df: pd.DataFrame,
+    *,
+    output_dir: Path,
+) -> None:
+    panel_dir = output_dir / "epitope_metric_panels"
+    panel_dir.mkdir(parents=True, exist_ok=True)
+
+    epitope_keys = sorted(
+        set(tuple(row) for row in clonotype_df.loc[:, ["chain", "epitope"]].drop_duplicates().to_records(index=False))
+        | set(tuple(row) for row in possig_cluster_df.loc[:, ["chain", "epitope"]].drop_duplicates().to_records(index=False))
+    )
+
+    for chain, epitope in epitope_keys:
+        nn_values = (
+            clonotype_df.loc[
+                clonotype_df["chain"].astype(str).eq(str(chain)) & clonotype_df["epitope"].astype(str).eq(str(epitope)),
+                "nearest_neighbor_distance",
+            ]
+            .dropna()
+            .to_numpy(dtype=float)
+        )
+        lfc_values = (
+            possig_cluster_df.loc[
+                possig_cluster_df["chain"].astype(str).eq(str(chain)) & possig_cluster_df["epitope"].astype(str).eq(str(epitope)),
+                "log_fold_change",
+            ]
+            .dropna()
+            .to_numpy(dtype=float)
+        )
+        if nn_values.size == 0 and lfc_values.size == 0:
             continue
 
-        bins = min(12, max(5, int(np.ceil(np.sqrt(values.size)))))
-        fig, ax = plt.subplots(figsize=(6.5, 4.5), constrained_layout=True)
-        ax.hist(values, bins=bins, color="#4c78a8", edgecolor="white")
-        ax.axvline(values.mean(), color="#f58518", linestyle="--", linewidth=2, label=f"mean={values.mean():.3f}")
-        ax.axvline(np.median(values), color="#54a24b", linestyle="-.", linewidth=2, label=f"median={np.median(values):.3f}")
-        ax.set_xlabel("d_epi")
-        ax.set_ylabel("Run count")
-        ax.set_title(f"{chain} {epitope}: distribution of run-level d_epi")
-        ax.legend(frameon=False)
+        fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.5), constrained_layout=True)
+        nn_ax, lfc_ax = axes
 
-        stem = distance_dir / f"{str(chain).lower()}_{epitope}_d_epi_hist"
+        if nn_values.size:
+            nn_bins = min(60, max(20, int(np.ceil(np.sqrt(nn_values.size)))))
+            nn_ax.hist(nn_values, bins=nn_bins, density=True, histtype="step", linewidth=2.0, color="#d55e00")
+            nn_ax.axvline(float(np.median(nn_values)), color="#d55e00", linestyle="--", linewidth=1.6, label=f"median={np.median(nn_values):.2f}")
+            nn_ax.legend(frameon=False)
+        else:
+            nn_ax.text(0.5, 0.5, "No sample clonotype distances", ha="center", va="center", transform=nn_ax.transAxes)
+        nn_ax.set_title("Nearest-neighbor distance")
+        nn_ax.set_xlabel("distance")
+        nn_ax.set_ylabel("density")
+        nn_ax.grid(alpha=0.2)
+
+        if lfc_values.size:
+            lfc_bins = min(40, max(10, int(np.ceil(np.sqrt(lfc_values.size)))))
+            lfc_ax.hist(lfc_values, bins=lfc_bins, density=True, histtype="step", linewidth=2.0, color="#0072b2")
+            lfc_ax.axvline(float(np.median(lfc_values)), color="#0072b2", linestyle="--", linewidth=1.6, label=f"median={np.median(lfc_values):.2f}")
+            lfc_ax.legend(frameon=False)
+        else:
+            lfc_ax.text(0.5, 0.5, "No possig clusters", ha="center", va="center", transform=lfc_ax.transAxes)
+        lfc_ax.set_title("Distribution of log fold change possig")
+        lfc_ax.set_xlabel("log_fold_change")
+        lfc_ax.set_ylabel("density")
+        lfc_ax.grid(alpha=0.2)
+
+        fig.suptitle(f"{chain} {epitope}: clonotype NN and possig cluster LFC", fontsize=14)
+        stem = panel_dir / f"{str(chain).lower()}_{epitope}_nn_lfc_possig"
         fig.savefig(stem.with_suffix(".png"), dpi=220, bbox_inches="tight")
         fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
+        fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight")
         plt.close(fig)
-
-
-def plot_epitope_distance_summary(epitope_distance_df: pd.DataFrame, *, output_dir: Path) -> None:
-    if epitope_distance_df.empty:
-        return
-
-    fig_height = max(5.0, 0.38 * len(epitope_distance_df) + 1.5)
-    fig, ax = plt.subplots(figsize=(9.0, fig_height), constrained_layout=True)
-    labels = [f"{row.chain}:{row.epitope}" for row in epitope_distance_df.itertuples(index=False)]
-    y = np.arange(len(epitope_distance_df))
-    means = epitope_distance_df["d_epi_mean"].to_numpy(dtype=float)
-    medians = epitope_distance_df["d_epi_median"].to_numpy(dtype=float)
-    stds = epitope_distance_df["d_epi_std"].fillna(0.0).to_numpy(dtype=float)
-
-    ax.barh(y, means, xerr=stds, color="#72b7b2", alpha=0.9, ecolor="#4c4c4c", capsize=3)
-    ax.scatter(medians, y, color="#e45756", s=26, zorder=3, label="median")
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-    ax.set_xlabel("d_epi")
-    ax.set_title("Mean d_epi by epitope with run-to-run spread")
-    ax.legend(frameon=False)
-
-    stem = output_dir / "epitope_mean_distance_summary"
-    fig.savefig(stem.with_suffix(".png"), dpi=220, bbox_inches="tight")
-    fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
-    fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight")
-    plt.close(fig)
 
 
 def main() -> None:
@@ -510,20 +748,28 @@ def main() -> None:
     scored_df = append_repo_native_scores(run_df, comparison_group=args.comparison_group, d_ref=d_ref)
     summary_df = summarize_parameter_heatmap(scored_df)
     run_distance_df, epitope_distance_df = summarize_distances(scored_df)
+    clonotype_df = collect_clonotype_rows(runs_root)
+    possig_cluster_df = collect_possig_cluster_rows(runs_root)
+    epitope_object_summary_df = summarize_epitope_object_metrics(clonotype_df, possig_cluster_df)
 
     run_level_path = output_dir / "run_level_metric_breakdown.tsv"
     summary_path = output_dir / "redcea_possig_parameter_runs.tsv"
     run_distance_path = output_dir / "run_level_distances.tsv"
     epitope_distance_path = output_dir / "epitope_distance_summary.tsv"
+    clonotype_nn_path = output_dir / "sample_clonotype_nn.tsv"
+    possig_cluster_path = output_dir / "possig_cluster_lfc.tsv"
+    epitope_object_summary_path = output_dir / "epitope_object_metric_summary.tsv"
     scored_df.to_csv(run_level_path, sep="\t", index=False)
     summary_df.to_csv(summary_path, sep="\t", index=False)
     run_distance_df.to_csv(run_distance_path, sep="\t", index=False)
     epitope_distance_df.to_csv(epitope_distance_path, sep="\t", index=False)
+    clonotype_df.to_csv(clonotype_nn_path, sep="\t", index=False)
+    possig_cluster_df.to_csv(possig_cluster_path, sep="\t", index=False)
+    epitope_object_summary_df.to_csv(epitope_object_summary_path, sep="\t", index=False)
 
     for chain in sorted(summary_df["chain"].astype(str).unique().tolist()):
         plot_chain_heatmap(summary_df, chain=chain, output_stem=output_dir / f"redcea_possig_density_score_{chain.lower()}")
-    plot_epitope_distance_histograms(scored_df, output_dir=output_dir)
-    plot_epitope_distance_summary(epitope_distance_df, output_dir=output_dir)
+    plot_epitope_metric_panels(clonotype_df, possig_cluster_df, output_dir=output_dir)
 
     print(f"Discovered {len(scored_df)} run(s) from {runs_root}")
     print(f"Reference distance: d_ref={d_ref:.6f} from {d_ref_source}")
@@ -531,15 +777,15 @@ def main() -> None:
     print(f"Saved {summary_path}")
     print(f"Saved {run_distance_path}")
     print(f"Saved {epitope_distance_path}")
+    print(f"Saved {clonotype_nn_path}")
+    print(f"Saved {possig_cluster_path}")
+    print(f"Saved {epitope_object_summary_path}")
     for chain in sorted(summary_df['chain'].astype(str).unique().tolist()):
         stem = output_dir / f"redcea_possig_density_score_{chain.lower()}"
         print(f"Saved {stem.with_suffix('.png')}")
         print(f"Saved {stem.with_suffix('.pdf')}")
         print(f"Saved {stem.with_suffix('.svg')}")
-    print(f"Saved {(output_dir / 'epitope_mean_distance_summary.png')}")
-    print(f"Saved {(output_dir / 'epitope_mean_distance_summary.pdf')}")
-    print(f"Saved {(output_dir / 'epitope_mean_distance_summary.svg')}")
-    print(f"Saved per-epitope histograms under {output_dir / 'distance_histograms'}")
+    print(f"Saved per-epitope object-level panels under {output_dir / 'epitope_metric_panels'}")
 
 
 if __name__ == "__main__":
