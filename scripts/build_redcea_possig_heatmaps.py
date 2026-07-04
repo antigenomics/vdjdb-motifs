@@ -274,13 +274,18 @@ def collect_run_rows(runs_root: Path) -> pd.DataFrame:
                 effective_sample_cluster_size = float(sample_mass_enriched / effective_n)
 
         lfc_possig_mean = float(lfc_values.loc[mask].mean()) if mask.any() else np.nan
-        d_epi = float(np.median(np.load(knn_path)))
+        knn_distances = np.load(knn_path)
+        knn_indices_path = locate_single_file(run_dir, "knn_sample_sample__*.indices.npy")
+        knn_indices = np.load(knn_indices_path)
+        nearest_neighbor_distance = compute_first_nonself_neighbor_distance(knn_distances, knn_indices)
+        d_epi = float(np.nanmedian(nearest_neighbor_distance))
 
         row = {
             "run_id": str(run_dir.relative_to(runs_root)).replace("\\", "/"),
             "run_dir": str(run_dir),
             "summary_path": str(summary_path),
             "knn_sample_sample_path": str(knn_path),
+            "knn_sample_sample_indices_path": str(knn_indices_path),
             "chain": str(chain),
             "epitope": str(epitope),
             "output_tag": combo_tag,
