@@ -346,7 +346,10 @@ def append_repo_native_scores(run_df: pd.DataFrame, *, comparison_group: str, d_
     out.loc[zero_enriched_mask, "effective_size_penalty"] = 0.0
     out["redcea_dense_score_base"] = out["coverage_rank_pct"] * out["effective_size_penalty"]
 
-    out["final_gamma"] = np.power(d_ref / pd.to_numeric(out["d_epi"], errors="coerce"), 2.0)
+    # Compress the d_ref/d_epi ratio so ultra-dense epitopes are still penalized
+    # but no longer collapse the final score to near-zero by exponent explosion.
+    d_ratio = d_ref / pd.to_numeric(out["d_epi"], errors="coerce")
+    out["final_gamma"] = np.log2(1.0 + d_ratio)
     lfc_numeric = pd.to_numeric(out["log_fold_change_possig__mean"], errors="coerce")
     out["final_lfc_component"] = np.power(1.0 - np.exp(-lfc_numeric / 8.0), 0.5)
     out["redcea_possig_density_score"] = out["redcea_dense_score_base"] * np.power(
