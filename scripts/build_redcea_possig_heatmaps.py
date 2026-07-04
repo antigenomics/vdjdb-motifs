@@ -5,6 +5,7 @@ import argparse
 import math
 import os
 import re
+import tempfile
 from pathlib import Path
 
 MPLCONFIGDIR = Path(".tmp/matplotlib").resolve()
@@ -138,6 +139,29 @@ def locate_single_file(run_dir: Path, pattern: str) -> Path:
     if not matches:
         raise FileNotFoundError(f"No files matching {pattern} under {run_dir}")
     return matches[0]
+
+
+def atomic_write_tsv(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent, suffix=".tmp", encoding="utf-8", newline="") as handle:
+        tmp_path = Path(handle.name)
+        df.to_csv(handle, sep="\t", index=False)
+    os.replace(tmp_path, path)
+
+
+def atomic_save_figure(fig: plt.Figure, path: Path, *, dpi: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(delete=False, dir=path.parent, suffix=path.suffix) as handle:
+        tmp_path = Path(handle.name)
+    try:
+        save_kwargs = {"bbox_inches": "tight"}
+        if dpi is not None:
+            save_kwargs["dpi"] = dpi
+        fig.savefig(tmp_path, **save_kwargs)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def load_reference_distance(path: Path) -> float:
@@ -619,10 +643,9 @@ def plot_chain_heatmap(summary_df: pd.DataFrame, *, chain: str, output_stem: Pat
     cbar = fig.colorbar(image, ax=ax)
     cbar.set_label("redcea_possig_density_score")
 
-    output_stem.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_stem.with_suffix(".png"), dpi=220, bbox_inches="tight")
-    fig.savefig(output_stem.with_suffix(".pdf"), bbox_inches="tight")
-    fig.savefig(output_stem.with_suffix(".svg"), bbox_inches="tight")
+    atomic_save_figure(fig, output_stem.with_suffix(".png"), dpi=220)
+    atomic_save_figure(fig, output_stem.with_suffix(".pdf"))
+    atomic_save_figure(fig, output_stem.with_suffix(".svg"))
     plt.close(fig)
 
 
@@ -661,6 +684,101 @@ def summarize_epitope_object_metrics(
         )
     )
     return nn_summary.merge(lfc_summary, on=["chain", "epitope"], how="outer").sort_values(["chain", "epitope"]).reset_index(drop=True)
+
+
+def summarize_parameter_robustness(summary_df: pd.DataFrame) -> pd.DataFrame:
+    metric_df = summary_df.copy()
+    metric_df["metric"] = pd.to_numeric(metric_df["metric"], errors="coerce")
+    total_epitopes = int(metric_df["epitope"].dropna().nunique())
+    robust = (
+        metric_df.groupby(
+            [
+                "chain",
+                "parameter_label",
+                "param_cluster_min_samples",
+                "param_eps_k_neighbors",
+                "param_k_neighbors",
+                "param_leiden_resolution",
+                "param_eps_estimation_based_on",
+                "param_vdbscan_sym_rule",
+            ],
+            dropna=False,
+        )
+        .agg(
+            n_epitopes=("epitope", "nunique"),
+            median_metric=("metric", "median"),
+            mean_metric=("metric", "mean"),
+            min_metric=("metric", "min"),
+            q25_metric=("metric", lambda s: float(s.quantile(0.25))),
+            q10_metric=("metric", lambda s: float(s.quantile(0.10))),
+            poor_epitopes=("metric", lambda s: int((s < 0.01).sum())),
+        )
+        .reset_index()
+    )
+    robust["coverage_fraction"] = robust["n_epitopes"] / float(total_epitopes) if total_epitopes > 0 else np.nan
+    robust["robust_selection_score"] = robust["coverage_fraction"] * robust["q25_metric"]
+    robust = robust.sort_values(
+        ["chain", "robust_selection_score", "q10_metric", "median_metric", "mean_metric"],
+        ascending=[True, False, False, False, False],
+    ).reset_index(drop=True)
+    robust["rank_within_chain"] = robust.groupby("chain").cumcount() + 1
+    return robust
+
+
+def summarize_best_parameter_by_epitope(summary_df: pd.DataFrame) -> pd.DataFrame:
+    metric_df = summary_df.copy()
+    metric_df["metric"] = pd.to_numeric(metric_df["metric"], errors="coerce")
+    best = (
+        metric_df.sort_values(
+            [
+                "chain",
+                "epitope",
+                "metric",
+                "param_k_neighbors",
+                "param_eps_k_neighbors",
+                "param_leiden_resolution",
+            ],
+            ascending=[True, True, False, True, True, True],
+        )
+        .groupby(["chain", "epitope"], dropna=False)
+        .head(1)
+        .reset_index(drop=True)
+    )
+    return best
+
+
+def summarize_metric_collection_coverage(
+    run_df: pd.DataFrame,
+    summary_df: pd.DataFrame,
+    clonotype_df: pd.DataFrame,
+    possig_cluster_df: pd.DataFrame,
+) -> pd.DataFrame:
+    score_epitopes = set(summary_df["epitope"].dropna().astype(str).unique().tolist())
+    object_epitopes = set(clonotype_df["epitope"].dropna().astype(str).unique().tolist())
+    possig_epitopes = set(possig_cluster_df["epitope"].dropna().astype(str).unique().tolist())
+    all_epitopes = sorted(score_epitopes | object_epitopes | possig_epitopes)
+
+    rows: list[dict[str, object]] = []
+    run_df_numeric = run_df.copy()
+    run_df_numeric["log_fold_change_possig__mean"] = pd.to_numeric(run_df_numeric["log_fold_change_possig__mean"], errors="coerce")
+    for epitope in all_epitopes:
+        ep_run = run_df_numeric.loc[run_df_numeric["epitope"].astype(str).eq(epitope)].copy()
+        ep_cl = clonotype_df.loc[clonotype_df["epitope"].astype(str).eq(epitope)].copy()
+        ep_pos = possig_cluster_df.loc[possig_cluster_df["epitope"].astype(str).eq(epitope)].copy()
+        rows.append(
+            {
+                "epitope": epitope,
+                "n_score_runs": int(len(ep_run)),
+                "n_parameter_rows": int(summary_df["epitope"].astype(str).eq(epitope).sum()),
+                "has_score_grid": bool(epitope in score_epitopes),
+                "n_clonotype_rows": int(len(ep_cl)),
+                "has_object_level_nn": bool(epitope in object_epitopes),
+                "n_possig_clusters": int(len(ep_pos)),
+                "has_possig_cluster_lfc": bool(epitope in possig_epitopes),
+                "n_runs_with_possig_signal": int(ep_run["log_fold_change_possig__mean"].notna().sum()),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("epitope").reset_index(drop=True)
 
 
 def plot_epitope_metric_panels(
@@ -726,9 +844,9 @@ def plot_epitope_metric_panels(
 
         fig.suptitle(f"{chain} {epitope}: clonotype NN and possig cluster LFC", fontsize=14)
         stem = panel_dir / f"{str(chain).lower()}_{epitope}_nn_lfc_possig"
-        fig.savefig(stem.with_suffix(".png"), dpi=220, bbox_inches="tight")
-        fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
-        fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight")
+        atomic_save_figure(fig, stem.with_suffix(".png"), dpi=220)
+        atomic_save_figure(fig, stem.with_suffix(".pdf"))
+        atomic_save_figure(fig, stem.with_suffix(".svg"))
         plt.close(fig)
 
 
@@ -751,6 +869,9 @@ def main() -> None:
     clonotype_df = collect_clonotype_rows(runs_root)
     possig_cluster_df = collect_possig_cluster_rows(runs_root)
     epitope_object_summary_df = summarize_epitope_object_metrics(clonotype_df, possig_cluster_df)
+    parameter_robustness_df = summarize_parameter_robustness(summary_df)
+    best_parameter_df = summarize_best_parameter_by_epitope(summary_df)
+    coverage_df = summarize_metric_collection_coverage(scored_df, summary_df, clonotype_df, possig_cluster_df)
 
     run_level_path = output_dir / "run_level_metric_breakdown.tsv"
     summary_path = output_dir / "redcea_possig_parameter_runs.tsv"
@@ -759,13 +880,19 @@ def main() -> None:
     clonotype_nn_path = output_dir / "sample_clonotype_nn.tsv"
     possig_cluster_path = output_dir / "possig_cluster_lfc.tsv"
     epitope_object_summary_path = output_dir / "epitope_object_metric_summary.tsv"
-    scored_df.to_csv(run_level_path, sep="\t", index=False)
-    summary_df.to_csv(summary_path, sep="\t", index=False)
-    run_distance_df.to_csv(run_distance_path, sep="\t", index=False)
-    epitope_distance_df.to_csv(epitope_distance_path, sep="\t", index=False)
-    clonotype_df.to_csv(clonotype_nn_path, sep="\t", index=False)
-    possig_cluster_df.to_csv(possig_cluster_path, sep="\t", index=False)
-    epitope_object_summary_df.to_csv(epitope_object_summary_path, sep="\t", index=False)
+    parameter_robustness_path = output_dir / "parameter_robustness_summary.tsv"
+    best_parameter_path = output_dir / "best_parameter_by_epitope.tsv"
+    coverage_path = output_dir / "metric_collection_coverage.tsv"
+    atomic_write_tsv(scored_df, run_level_path)
+    atomic_write_tsv(summary_df, summary_path)
+    atomic_write_tsv(run_distance_df, run_distance_path)
+    atomic_write_tsv(epitope_distance_df, epitope_distance_path)
+    atomic_write_tsv(clonotype_df, clonotype_nn_path)
+    atomic_write_tsv(possig_cluster_df, possig_cluster_path)
+    atomic_write_tsv(epitope_object_summary_df, epitope_object_summary_path)
+    atomic_write_tsv(parameter_robustness_df, parameter_robustness_path)
+    atomic_write_tsv(best_parameter_df, best_parameter_path)
+    atomic_write_tsv(coverage_df, coverage_path)
 
     for chain in sorted(summary_df["chain"].astype(str).unique().tolist()):
         plot_chain_heatmap(summary_df, chain=chain, output_stem=output_dir / f"redcea_possig_density_score_{chain.lower()}")
@@ -780,6 +907,9 @@ def main() -> None:
     print(f"Saved {clonotype_nn_path}")
     print(f"Saved {possig_cluster_path}")
     print(f"Saved {epitope_object_summary_path}")
+    print(f"Saved {parameter_robustness_path}")
+    print(f"Saved {best_parameter_path}")
+    print(f"Saved {coverage_path}")
     for chain in sorted(summary_df['chain'].astype(str).unique().tolist()):
         stem = output_dir / f"redcea_possig_density_score_{chain.lower()}"
         print(f"Saved {stem.with_suffix('.png')}")

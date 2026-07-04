@@ -147,6 +147,9 @@ It writes:
 - `sample_clonotype_nn.tsv`
 - `possig_cluster_lfc.tsv`
 - `epitope_object_metric_summary.tsv`
+- `parameter_robustness_summary.tsv`
+- `best_parameter_by_epitope.tsv`
+- `metric_collection_coverage.tsv`
 - publication-style heatmaps in `png` / `pdf` / `svg`
 - per-epitope diagnostic panels under `epitope_metric_panels/`, where:
   - the left subplot is the sample-clonotype nearest-neighbor distance distribution
