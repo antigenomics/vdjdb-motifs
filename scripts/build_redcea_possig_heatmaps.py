@@ -219,6 +219,8 @@ def compute_first_nonself_neighbor_distance(knn_distances: np.ndarray, knn_indic
     filtered = np.where(valid_mask, knn_distances.astype(np.float64, copy=False), np.inf)
     nearest = filtered.min(axis=1)
     nearest[~np.isfinite(nearest)] = np.nan
+    # FAISS IndexFlatL2 returns squared L2 distances; convert to Euclidean distance.
+    nearest = np.sqrt(nearest)
     return nearest.astype("float64", copy=False)
 
 

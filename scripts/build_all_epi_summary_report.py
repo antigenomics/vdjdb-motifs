@@ -166,7 +166,8 @@ def plot_final_figure(
 
     rank_plot = parameter_robustness.head(8).iloc[::-1].copy()
     rank_plot["short_label"] = rank_plot["parameter_label"].map(shorten_parameter_label)
-    colors = ["#d55e00" if rank == 1 else "#4c78a8" for rank in rank_plot["rank"]]
+    rank_column = "rank_within_chain" if "rank_within_chain" in rank_plot.columns else "rank"
+    colors = ["#d55e00" if rank == 1 else "#4c78a8" for rank in rank_plot[rank_column]]
     ax_rank.barh(rank_plot["short_label"], rank_plot["robust_selection_score"], color=colors, alpha=0.95)
     for idx, row in rank_plot.reset_index(drop=True).iterrows():
         label = f"med {row['median_metric']:.3f} | q25 {row['q25_metric']:.3f} | cov {row['coverage_fraction']:.2f}"
@@ -207,8 +208,10 @@ def plot_final_figure(
     ax_nn.set_ylabel("Nearest-neighbor distance")
     ax_nn.tick_params(axis="x", rotation=35)
 
-    lfc_frame = possig_clusters.loc[:, ["epitope", "log_fold_change_possig"]].copy()
-    lfc_frame["log_fold_change_possig"] = pd.to_numeric(lfc_frame["log_fold_change_possig"], errors="coerce")
+    lfc_value_col = "log_fold_change_possig" if "log_fold_change_possig" in possig_clusters.columns else "log_fold_change"
+    lfc_frame = possig_clusters.loc[:, ["epitope", lfc_value_col]].copy()
+    lfc_frame[lfc_value_col] = pd.to_numeric(lfc_frame[lfc_value_col], errors="coerce")
+    lfc_frame = lfc_frame.rename(columns={lfc_value_col: "log_fold_change_possig"})
     lfc_order = lfc_summary.sort_values("lfc_possig_median")["epitope"].tolist()
     sns.violinplot(
         data=lfc_frame,
@@ -296,7 +299,7 @@ def build_report_markdown(
         f"- Recommended: `{best['parameter_label']}`",
         f"- Why: full epitope coverage `{best['coverage_fraction']:.2f}`, strongest lower-quartile protection `q25={best['q25_metric']:.3f}`, and competitive median score `median={best['median_metric']:.3f}`.",
         f"- Comparator with higher raw median but weaker deployment coverage/stability: `{second['parameter_label']}` with `median={second['median_metric']:.3f}`, `q25={second['q25_metric']:.3f}`, coverage `{second['coverage_fraction']:.2f}`.",
-        "- Interpretation: sample-based variants can peak higher on individual epitopes, but the selected background-based `k=12 / ek=8 / res=0.5` setting is more conservative on weak epitopes and therefore safer as a publication default.",
+        f"- Interpretation: sample-based variants can peak higher on individual epitopes, but the selected background-based `{best['parameter_label']}` setting is more conservative on weak epitopes and therefore safer as a publication default.",
         "",
         "## Biological sanity checks",
         f"- Tightest clonotype packing by nearest-neighbor median: `{nn_best.iloc[0]['epitope']}` (`{nn_best.iloc[0]['nn_median']:.2f}`), consistent with a denser sequence neighborhood.",
@@ -307,7 +310,7 @@ def build_report_markdown(
         "",
         "## Computational correctness checks",
         "- Positive-significant clusters were defined exactly as in the REDCEA/tcrempnet logic: `cluster_id != -1`, `enrichment_fdr_zbinom < 0.05`, and `log_fold_change > 0`.",
-        "- The nearest-neighbor diagnostic is object-level on sample clonotypes, taken from the saved `knn_sample_sample__*.distances.npy` projections already materialized into `sample_clonotype_nn.tsv`.",
+        "- The nearest-neighbor diagnostic is object-level on sample clonotypes, derived from the saved `knn_sample_sample__*.distances.npy` projections and converted to Euclidean distance before materialization into `sample_clonotype_nn.tsv`.",
         "- The LFC diagnostic is cluster-level and is now read directly from `possig_cluster_lfc.tsv` emitted by the collector.",
         "",
         "## Outputs",

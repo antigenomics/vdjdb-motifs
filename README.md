@@ -152,5 +152,5 @@ It writes:
 - `metric_collection_coverage.tsv`
 - publication-style heatmaps in `png` / `pdf` / `svg`
 - per-epitope diagnostic panels under `epitope_metric_panels/`, where:
-  - the left subplot is the sample-clonotype nearest-neighbor distance distribution
+  - the left subplot is the sample-clonotype Euclidean nearest-neighbor distance distribution
   - the right subplot is the `log_fold_change` distribution over all positive-significant enriched clusters
