@@ -42,6 +42,16 @@ def get_arguments_vdjdb_clusters(argv: list[str] | None = None):
         help="Optional list of epitopes to restrict analysis to.",
     )
     parser.add_argument(
+        "--epitope-config",
+        default=None,
+        help=(
+            "Optional JSON file with per-epitope clustering overrides. "
+            "Supported keys per epitope: cluster_algo, k_neighbors, eps_k_neighbors, "
+            "leiden_resolution, cluster_min_samples, eps_estimation_based_on, "
+            "vdbscan_sym_rule, leiden_sub_resolution."
+        ),
+    )
+    parser.add_argument(
         "--min-epitope-clonotypes",
         type=int,
         default=None,

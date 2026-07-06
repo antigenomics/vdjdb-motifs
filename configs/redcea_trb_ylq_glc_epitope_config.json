@@ -1,0 +1,24 @@
+{
+  "epitopes": {
+    "YLQPRTFLL": {
+      "cluster_algo": "vdbscan_leiden",
+      "k_neighbors": 12,
+      "eps_k_neighbors": 8,
+      "leiden_resolution": 1.0,
+      "cluster_min_samples": 3,
+      "eps_estimation_based_on": "background",
+      "vdbscan_sym_rule": "asymmetric",
+      "leiden_sub_resolution": 1.0
+    },
+    "GLCTLVAML": {
+      "cluster_algo": "vdbscan_leiden",
+      "k_neighbors": 8,
+      "eps_k_neighbors": 8,
+      "leiden_resolution": 0.5,
+      "cluster_min_samples": 3,
+      "eps_estimation_based_on": "sample",
+      "vdbscan_sym_rule": "asymmetric",
+      "leiden_sub_resolution": 1.0
+    }
+  }
+}

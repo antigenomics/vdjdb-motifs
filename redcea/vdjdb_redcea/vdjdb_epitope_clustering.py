@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import gc
 import logging
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .arguments import get_arguments_vdjdb_clusters
-from .config import CHAIN_COLS, DEFAULT_PLOT_BG_POINTS
+from .config import CHAIN_COLS, DEFAULT_PLOT_BG_POINTS, EpitopeClusteringParams
 
 
 @dataclass(frozen=True)
@@ -202,7 +204,8 @@ def _load_precomputed_sample_embeddings(args, lib, locus: str, paths, prefix: st
 def _perform_clustering(
     sample_pca: np.ndarray,
     bg_pca: np.ndarray,
-    args,
+    clustering_params: EpitopeClusteringParams,
+    nproc: int,
     sample_index_path: Path,
     bg_index_path: Path,
     sample_ids: pd.Series,
@@ -214,20 +217,237 @@ def _perform_clustering(
     distances, indices = resolve_joint_knn(
         sample_pca,
         bg_pca,
-        args.k_neighbors,
-        args.nproc,
+        clustering_params.k_neighbors,
+        nproc,
         sample_index_path=sample_index_path,
         bg_index_path=bg_index_path,
     )
     labels = run_leiden_clustering(
         knn_indices=indices,
         knn_distances=distances,
-        resolution=args.leiden_resolution,
-        n_threads=args.nproc,
-        min_cluster_size=args.cluster_min_samples,
+        resolution=clustering_params.leiden_resolution,
+        n_threads=nproc,
+        min_cluster_size=clustering_params.cluster_min_samples,
         min_cluster_size_mask=np.arange(len(sample_pca) + len(bg_pca)) < len(sample_pca),
     )
     return sample_pca, labels
+
+
+def _resolve_epitope_clustering_params(args, epitope: str) -> EpitopeClusteringParams:
+    params = EpitopeClusteringParams.from_args(args)
+    overrides = getattr(args, "epitope_clustering_overrides", {}) or {}
+    override = overrides.get(epitope)
+    if override is None:
+        return params
+    return params.with_overrides(
+        cluster_algo=override.cluster_algo,
+        k_neighbors=override.k_neighbors,
+        eps_k_neighbors=override.eps_k_neighbors,
+        leiden_resolution=override.leiden_resolution,
+        cluster_min_samples=override.cluster_min_samples,
+        eps_estimation_based_on=override.eps_estimation_based_on,
+        vdbscan_sym_rule=override.vdbscan_sym_rule,
+        leiden_sub_resolution=override.leiden_sub_resolution,
+    )
+
+
+def _build_clonotype_coords_table(
+    *,
+    epitope: str,
+    chain: str,
+    sample_reps: pd.DataFrame,
+    sample_ids: pd.Series,
+    sample_labels: np.ndarray,
+    summary_df: pd.DataFrame,
+    sample_umap,
+    clustering_params: EpitopeClusteringParams,
+) -> pd.DataFrame:
+    cfg = CHAIN_COLS[chain]
+    cdr3_col = f"cdr3aa_{cfg['gene']}"
+    v_col = f"v_{cfg['gene']}"
+    j_col = f"j_{cfg['gene']}"
+
+    df = sample_reps.copy().reset_index(drop=True)
+    df["clone_id"] = sample_ids.to_numpy()
+    df["cluster_id"] = np.asarray(sample_labels[: len(sample_ids)], dtype=np.int32)
+    if sample_umap is None:
+        df["x"] = pd.NA
+        df["y"] = pd.NA
+    else:
+        df["x"] = sample_umap[:, 0]
+        df["y"] = sample_umap[:, 1]
+
+    summary_by_cluster = summary_df.set_index("cluster_id")
+    df["significant"] = df["cluster_id"].map(summary_by_cluster["significant"]).fillna(False)
+    df["cluster_size_sample"] = df["cluster_id"].map(summary_by_cluster["sample"])
+    df["log_fold_change"] = df["cluster_id"].map(summary_by_cluster["log_fold_change"])
+
+    return pd.DataFrame(
+        {
+            "chain": chain,
+            "epitope": epitope,
+            "clone_id": df["clone_id"],
+            "cdr3aa": df[cdr3_col] if cdr3_col in df.columns else pd.NA,
+            "v.segm": df[v_col] if v_col in df.columns else pd.NA,
+            "j.segm": df[j_col] if j_col in df.columns else pd.NA,
+            "x": df["x"],
+            "y": df["y"],
+            "cluster_id": df["cluster_id"],
+            "significant": df["significant"],
+            "cluster_size_sample": df["cluster_size_sample"],
+            "log_fold_change": df["log_fold_change"],
+            "cluster_algo": clustering_params.cluster_algo,
+            "k_neighbors": clustering_params.k_neighbors,
+            "eps_k_neighbors": clustering_params.eps_k_neighbors,
+            "leiden_resolution": clustering_params.leiden_resolution,
+            "cluster_min_samples": clustering_params.cluster_min_samples,
+            "eps_estimation_based_on": clustering_params.eps_estimation_based_on,
+            "vdbscan_sym_rule": clustering_params.vdbscan_sym_rule,
+            "leiden_sub_resolution": clustering_params.leiden_sub_resolution,
+        }
+    )
+
+
+def _build_background_coords_table(*, chain: str, bg_umap: np.ndarray) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "chain": chain,
+            "background_index": np.arange(len(bg_umap), dtype=np.int32),
+            "x": bg_umap[:, 0],
+            "y": bg_umap[:, 1],
+        }
+    )
+
+
+def _format_epitope_param_tag(params: EpitopeClusteringParams) -> str:
+    resolution_tag = str(params.leiden_resolution).replace(".", "p")
+    eps_mode = "".join(ch for ch in params.eps_estimation_based_on if ch.isalnum() or ch in {"-", "_"})
+    sym_rule = "".join(ch for ch in params.vdbscan_sym_rule if ch.isalnum() or ch in {"-", "_"})
+    algo = "".join(ch for ch in params.cluster_algo if ch.isalnum() or ch in {"-", "_"})
+    return (
+        f"{algo}_k{params.k_neighbors}_ek{params.eps_k_neighbors}_"
+        f"res{resolution_tag}_min{params.cluster_min_samples}_eps{eps_mode}_sym{sym_rule}"
+    )
+
+
+def _build_sample_labels(sample_ids: pd.Series, sample_cluster_df: pd.DataFrame) -> np.ndarray:
+    cluster_lookup = (
+        sample_cluster_df.loc[:, ["clone_id", "cluster_id"]]
+        .drop_duplicates(subset=["clone_id"])
+        .set_index("clone_id")["cluster_id"]
+        .to_dict()
+    )
+    return np.asarray([int(cluster_lookup.get(clone_id, -1)) for clone_id in sample_ids], dtype=np.int32)
+
+
+def _run_external_vdbscan_clustering(
+    *,
+    epitope_data: dict[str, object],
+    args,
+    paths,
+    clustering_params: EpitopeClusteringParams,
+    sample_ids: pd.Series,
+) -> EpitopeClusteringArtifacts:
+    prefix = str(epitope_data["prefix"])
+    epitope = str(epitope_data["epitope"])
+    run_dir = paths.output_root / "per_epitope_cluster_runs" / prefix / _format_epitope_param_tag(clustering_params)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "redcea.redcea",
+        "--sample",
+        str(Path(epitope_data["airr_path"]).resolve()),
+        "--background",
+        str(Path(args.background).resolve()),
+        "--output",
+        str(run_dir),
+        "--prefix",
+        prefix,
+        "--chain",
+        str(args.chain),
+        "--species",
+        str(args.species),
+        "--metrics",
+        str(args.metrics),
+        "--sample-embedding",
+        str(Path(epitope_data["sample_embedding_path"]).resolve()),
+        "--background-embedding",
+        str(Path(args.background_embedding).resolve()),
+        "--cluster-pc-components",
+        str(args.cluster_pc_components),
+        "--cluster-algo",
+        str(clustering_params.cluster_algo),
+        "--core-min-samples",
+        str(clustering_params.cluster_min_samples),
+        "--k-neighbors",
+        str(clustering_params.k_neighbors),
+        "--eps-k-neighbors",
+        str(clustering_params.eps_k_neighbors),
+        "--leiden-resolution",
+        str(clustering_params.leiden_resolution),
+        "--leiden-sub-resolution",
+        str(clustering_params.leiden_sub_resolution),
+        "--eps-estimation-based-on",
+        str(clustering_params.eps_estimation_based_on),
+        "--vdbscan-sym-rule",
+        str(clustering_params.vdbscan_sym_rule),
+        "--random-seed",
+        str(args.random_seed),
+        "--nproc",
+        str(args.nproc),
+    ]
+    if args.n_bg_points is not None:
+        cmd.extend(["--n-bg-points", str(args.n_bg_points)])
+
+    logging.info("Running external clustering backend for epitope %s: %s", epitope, " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Could not run external vdbscan backend because `redcea.redcea` is unavailable in this environment."
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "External vdbscan backend failed for "
+            f"{epitope} with exit code {exc.returncode}.\nSTDOUT:\n{exc.stdout}\nSTDERR:\n{exc.stderr}"
+        ) from exc
+
+    cluster_path = run_dir / f"{prefix}_tcremp_clusters.tsv"
+    summary_path = run_dir / f"{prefix}_summary_tcrempnet.tsv"
+    if not cluster_path.exists():
+        raise FileNotFoundError(f"Missing external cluster output: {cluster_path}")
+    if not summary_path.exists():
+        raise FileNotFoundError(f"Missing external summary output: {summary_path}")
+
+    cluster_df = pd.read_csv(cluster_path, sep="\t")
+    summary_df = pd.read_csv(summary_path, sep="\t")
+    if "significant" not in summary_df.columns:
+        summary_df["significant"] = (
+            (pd.to_numeric(summary_df["enrichment_fdr_zbinom"], errors="coerce") < 0.05)
+            & (pd.to_numeric(summary_df["log_fold_change"], errors="coerce") > 0)
+        )
+
+    sample_id_set = set(sample_ids.astype(str))
+    cluster_df["clone_id"] = cluster_df["clone_id"].astype(str)
+    summary_df["cluster_id"] = pd.to_numeric(summary_df["cluster_id"], errors="coerce").astype(int)
+    significant_cluster_ids = set(summary_df.loc[summary_df["significant"], "cluster_id"].astype(int))
+    sample_cluster_df = cluster_df[
+        cluster_df["clone_id"].isin(sample_id_set) & pd.to_numeric(cluster_df["cluster_id"], errors="coerce").ne(-1)
+    ].copy()
+    sample_cluster_df["cluster_id"] = pd.to_numeric(sample_cluster_df["cluster_id"], errors="coerce").astype(int)
+    enriched_sample_cluster_df = sample_cluster_df[
+        sample_cluster_df["cluster_id"].isin(significant_cluster_ids)
+    ].copy()
+
+    return EpitopeClusteringArtifacts(
+        cluster_df=cluster_df,
+        summary_df=summary_df,
+        significant_cluster_ids=significant_cluster_ids,
+        sample_cluster_df=sample_cluster_df,
+        enriched_sample_cluster_df=enriched_sample_cluster_df,
+    )
 
 
 def _precompute_epitope_embeddings(
@@ -464,14 +684,16 @@ def _stage_run_per_epitope_analysis(
     bg_ids: pd.Series,
     bg_index_path: Path,
     bg_umap,
-) -> tuple[list[pd.DataFrame], list[pd.DataFrame], list[pd.DataFrame]]:
-    """Stage 4: run per-epitope clustering and save outputs."""
+) -> tuple[list[pd.DataFrame], list[pd.DataFrame], list[pd.DataFrame], list[pd.DataFrame], list[dict[str, object]]]:
+    """Stage 4: run per-epitope clustering and collect exported tables."""
     logging.info("Stage 4/4: running per-epitope clustering analysis")
     clustered_tables: list[pd.DataFrame] = []
     cluster_members_tables: list[pd.DataFrame] = []
     all_cluster_members_tables: list[pd.DataFrame] = []
+    clonotype_coords_tables: list[pd.DataFrame] = []
+    parameter_rows: list[dict[str, object]] = []
     for epitope_data in epitope_inputs:
-        clustered_df, cluster_members_df, all_cluster_members_df = process_epitope(
+        clustered_df, cluster_members_df, all_cluster_members_df, clonotype_coords_df, parameter_row = process_epitope(
             epitope_data,
             args=args,
             paths=paths,
@@ -484,8 +706,10 @@ def _stage_run_per_epitope_analysis(
         clustered_tables.append(clustered_df)
         cluster_members_tables.append(cluster_members_df)
         all_cluster_members_tables.append(all_cluster_members_df)
+        clonotype_coords_tables.append(clonotype_coords_df)
+        parameter_rows.append(parameter_row)
     logging.info("Stage 4/4 done")
-    return clustered_tables, cluster_members_tables, all_cluster_members_tables
+    return clustered_tables, cluster_members_tables, all_cluster_members_tables, clonotype_coords_tables, parameter_rows
 
 
 def _compute_summary_and_significance(summary_df: pd.DataFrame, sample_ids: pd.Series, bg_ids: pd.Series):
@@ -580,7 +804,7 @@ def process_epitope(
     bg_ids: pd.Series,
     bg_index_path: Path,
     bg_umap,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, object]]:
     """Process a single epitope for clustering.
 
     Args:
@@ -594,7 +818,7 @@ def process_epitope(
         bg_umap: Background UMAP.
 
     Returns:
-        Tuple of clustered DataFrame and cluster members DataFrame.
+        Cluster outputs, 2D clonotype coordinates, and effective parameters.
     """
     from .io import build_sample_members_table, sanitize_filename_token
     from .plotting import save_cluster_plot_html
@@ -609,17 +833,50 @@ def process_epitope(
     sample_umap = epitope_data.get("sample_umap")
 
     chain = args.chain
+    clustering_params = _resolve_epitope_clustering_params(args, str(epitope))
 
-    logging.info("Processing epitope %s with %d clonotypes", epitope, len(ep_df))
-    sample_pca, labels = _perform_clustering(sample_pca, bg_pca, args, sample_index_path, bg_index_path, sample_ids, bg_ids)
-
-    artifacts = _build_epitope_clustering_artifacts(
-        labels=labels,
-        sample_ids=sample_ids,
-        bg_ids=bg_ids,
-        sample_reps=sample_reps,
-        bg_reps=bg_reps,
+    logging.info(
+        "Processing epitope %s with %d clonotypes using algo=%s, k=%d, eps_k=%d, resolution=%s, min_samples=%d, eps_mode=%s, sym_rule=%s",
+        epitope,
+        len(ep_df),
+        clustering_params.cluster_algo,
+        clustering_params.k_neighbors,
+        clustering_params.eps_k_neighbors,
+        clustering_params.leiden_resolution,
+        clustering_params.cluster_min_samples,
+        clustering_params.eps_estimation_based_on,
+        clustering_params.vdbscan_sym_rule,
     )
+    if clustering_params.cluster_algo == "leiden":
+        sample_pca, labels = _perform_clustering(
+            sample_pca,
+            bg_pca,
+            clustering_params,
+            args.nproc,
+            sample_index_path,
+            bg_index_path,
+            sample_ids,
+            bg_ids,
+        )
+        artifacts = _build_epitope_clustering_artifacts(
+            labels=labels,
+            sample_ids=sample_ids,
+            bg_ids=bg_ids,
+            sample_reps=sample_reps,
+            bg_reps=bg_reps,
+        )
+        sample_labels = np.asarray(labels[: len(sample_ids)], dtype=np.int32)
+    elif clustering_params.cluster_algo in {"vdbscan_leiden", "vdbscan"}:
+        artifacts = _run_external_vdbscan_clustering(
+            epitope_data=epitope_data,
+            args=args,
+            paths=paths,
+            clustering_params=clustering_params,
+            sample_ids=sample_ids,
+        )
+        sample_labels = _build_sample_labels(sample_ids, artifacts.sample_cluster_df)
+    else:
+        raise ValueError(f"Unsupported per-epitope cluster_algo: {clustering_params.cluster_algo}")
     sample_cluster_count = artifacts.sample_cluster_df["cluster_id"].nunique()
     enriched_cluster_count = artifacts.enriched_sample_cluster_df["cluster_id"].nunique()
 
@@ -637,6 +894,16 @@ def process_epitope(
     all_cluster_members_df = build_sample_members_table(
         lfc_positive_sample_cluster_df, artifacts.summary_df, chain, ep_df, epitope, sample_ids, sample_umap
     )
+    clonotype_coords_df = _build_clonotype_coords_table(
+        epitope=epitope,
+        chain=chain,
+        sample_reps=sample_reps,
+        sample_ids=sample_ids,
+        sample_labels=sample_labels,
+        summary_df=artifacts.summary_df,
+        sample_umap=sample_umap,
+        clustering_params=clustering_params,
+    )
 
     _save_cluster_results(
         artifacts.cluster_df,
@@ -648,7 +915,6 @@ def process_epitope(
     )
 
     if not args.skip_umap:
-        sample_labels = np.asarray(labels[: len(sample_ids)], dtype=np.int32)
         viz_filename = (
             f"{sanitize_filename_token(args.species)}_"
             f"{sanitize_filename_token(epitope)}_"
@@ -678,9 +944,26 @@ def process_epitope(
     )
 
     sample_cluster_df = artifacts.sample_cluster_df
-    del sample_reps, sample_ids, sample_pca, sample_umap, labels, artifacts
+    del sample_reps, sample_ids, sample_pca, sample_umap, sample_labels, artifacts
     gc.collect()
-    return sample_cluster_df, cluster_members_df, all_cluster_members_df
+    return (
+        sample_cluster_df,
+        cluster_members_df,
+        all_cluster_members_df,
+        clonotype_coords_df,
+        {
+            "chain": chain,
+            "epitope": epitope,
+            "cluster_algo": clustering_params.cluster_algo,
+            "k_neighbors": clustering_params.k_neighbors,
+            "eps_k_neighbors": clustering_params.eps_k_neighbors,
+            "leiden_resolution": clustering_params.leiden_resolution,
+            "cluster_min_samples": clustering_params.cluster_min_samples,
+            "eps_estimation_based_on": clustering_params.eps_estimation_based_on,
+            "vdbscan_sym_rule": clustering_params.vdbscan_sym_rule,
+            "leiden_sub_resolution": clustering_params.leiden_sub_resolution,
+        },
+    )
 
 
 def main():
@@ -696,9 +979,19 @@ def main():
             resolve_prototype_file,
             subsample_repertoire,
         )
+        from .epitope_params import load_epitope_clustering_overrides
         from .io import filter_canonical_cdr3_rows, prepare_output_dirs
 
         args = get_arguments_vdjdb_clusters()
+        args.epitope_clustering_overrides = (
+            load_epitope_clustering_overrides(args.epitope_config) if args.epitope_config else {}
+        )
+        if args.epitope_clustering_overrides:
+            logging.info(
+                "Loaded per-epitope clustering overrides for %d epitope(s) from %s",
+                len(args.epitope_clustering_overrides),
+                args.epitope_config,
+            )
 
         output_root = prepare_output_path(args.output)
         tcremp_cache_dir = Path(args.tcremp_cache_dir).resolve() if args.tcremp_cache_dir else None
@@ -821,7 +1114,13 @@ def main():
                 transform_path=transform_path,
             )
 
-        clustered_tables, cluster_members_tables, all_cluster_members_tables = _stage_run_per_epitope_analysis(
+        (
+            clustered_tables,
+            cluster_members_tables,
+            all_cluster_members_tables,
+            clonotype_coords_tables,
+            parameter_rows,
+        ) = _stage_run_per_epitope_analysis(
             epitope_inputs,
             args=args,
             paths=paths,
@@ -831,7 +1130,7 @@ def main():
             bg_index_path=bg_index_path,
             bg_umap=bg_umap,
         )
-        del epitope_inputs, epitope_infos, bg_umap
+        del epitope_inputs, epitope_infos
         gc.collect()
 
         chain_lower = args.chain.lower()
@@ -849,7 +1148,35 @@ def main():
                 sep="\t",
                 index=False,
             )
-        del clustered_tables, cluster_members_tables, all_cluster_members_tables, bg_pca, bg_reps, bg_ids
+        if clonotype_coords_tables:
+            pd.concat(clonotype_coords_tables, ignore_index=True).to_csv(
+                output_root / f"{chain_lower}_vdjdb_clonotype_coords_2d.tsv",
+                sep="\t",
+                index=False,
+            )
+        if parameter_rows:
+            pd.DataFrame(parameter_rows).to_csv(
+                output_root / f"{chain_lower}_vdjdb_epitope_clustering_params.tsv",
+                sep="\t",
+                index=False,
+            )
+        if bg_umap is not None:
+            _build_background_coords_table(chain=args.chain, bg_umap=bg_umap).to_csv(
+                output_root / f"{chain_lower}_background_coords_2d.tsv",
+                sep="\t",
+                index=False,
+            )
+        del (
+            clustered_tables,
+            cluster_members_tables,
+            all_cluster_members_tables,
+            clonotype_coords_tables,
+            parameter_rows,
+            bg_umap,
+            bg_pca,
+            bg_reps,
+            bg_ids,
+        )
         gc.collect()
 
         logging.info("Done")

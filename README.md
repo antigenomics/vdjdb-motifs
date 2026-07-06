@@ -109,6 +109,39 @@ UMAP tuning note:
 - if sample clusters form detached islands far from the grey background cloud, try increasing these values, for example `--umap-n-neighbors 50 --umap-min-dist 0.4`
 - changing either value invalidates the previous plotting transform on purpose, so the cached background transform is recomputed automatically
 
+Per-epitope clustering note:
+- `python -m vdjdb_redcea.vdjdb_epitope_clustering` now accepts `--epitope-config <json>`
+- the JSON can override `cluster_algo`, `k_neighbors`, `eps_k_neighbors`, `leiden_resolution`, `cluster_min_samples`, `eps_estimation_based_on`, and `vdbscan_sym_rule` per epitope while still fitting one shared background transform and one joint plotting UMAP across the whole selected epitope set
+- this is useful when you want one common background view for multiple epitopes but still keep each epitope's best clustering hyperparameters
+- accepted JSON shapes are either a top-level epitope mapping or `{ "epitopes": { ... } }`
+
+Example:
+
+```json
+{
+  "epitopes": {
+    "YLQPRTFLL": {
+      "cluster_algo": "vdbscan_leiden",
+      "k_neighbors": 12,
+      "eps_k_neighbors": 8,
+      "leiden_resolution": 1.0,
+      "cluster_min_samples": 3,
+      "eps_estimation_based_on": "background",
+      "vdbscan_sym_rule": "asymmetric"
+    },
+    "GLCTLVAML": {
+      "cluster_algo": "vdbscan_leiden",
+      "k_neighbors": 8,
+      "eps_k_neighbors": 8,
+      "leiden_resolution": 0.5,
+      "cluster_min_samples": 3,
+      "eps_estimation_based_on": "sample",
+      "vdbscan_sym_rule": "asymmetric"
+    }
+  }
+}
+```
+
 ## Notes
 
 - TCRNET outputs now go to `results/tcrnet/` and keep the standard names `cluster_members.txt` and `motif_pwms.txt`.
@@ -118,6 +151,7 @@ UMAP tuning note:
 - REDCEA writes both chains into `results/redcea/`.
 - REDCEA HTML visualizations are collected in `results/redcea/viz/`.
 - REDCEA `cluster_members_TRA.txt` and `cluster_members_TRB.txt` are written directly into `results/redcea/`.
+- REDCEA also writes `<chain>_vdjdb_clonotype_coords_2d.tsv` with exported 2D sample clonotype coordinates and `<chain>_background_coords_2d.tsv` with the shared background layout for downstream custom visualization.
 - REDCEA uses `vdjdb_release/vdjdb.slim.txt` as the default VDJdb input table.
 - REDCEA respects `REDCEA_NPROC`; when `REDCEA_CHAIN=both`, `TRA` and `TRB` are still launched in parallel as separate jobs.
 
@@ -144,13 +178,17 @@ It writes:
 - `redcea_possig_parameter_runs.tsv`
 - `run_level_distances.tsv`
 - `epitope_distance_summary.tsv`
+- `epitope_tightness_summary.tsv`
 - `sample_clonotype_nn.tsv`
 - `possig_cluster_lfc.tsv`
 - `epitope_object_metric_summary.tsv`
 - `parameter_robustness_summary.tsv`
 - `best_parameter_by_epitope.tsv`
+- `parameter_tightness_dependence.tsv`
+- `selected_parameter_contrasts.tsv`
 - `metric_collection_coverage.tsv`
 - publication-style heatmaps in `png` / `pdf` / `svg`
+- extra heatmaps with epitopes sorted by nearest-neighbor tightness and a reduced top-config panel chosen to contrast tight vs loose epitopes
 - per-epitope diagnostic panels under `epitope_metric_panels/`, where:
   - the left subplot is the sample-clonotype Euclidean nearest-neighbor distance distribution
   - the right subplot is the `log_fold_change` distribution over all positive-significant enriched clusters
