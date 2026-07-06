@@ -85,7 +85,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metadata-output", type=Path, default=default_metadata_path)
     parser.add_argument("--bins", type=int, default=240, help="Histogram bins per axis for contour estimation.")
     parser.add_argument("--background-sigma", type=float, default=2.4)
-    parser.add_argument("--background-levels", type=float, nargs="+", default=[0.10, 0.18, 0.30, 0.46, 0.66])
+    parser.add_argument(
+        "--background-levels",
+        type=float,
+        nargs="+",
+        default=[0.06, 0.10, 0.15, 0.21, 0.28, 0.36, 0.45, 0.55, 0.66, 0.78],
+    )
     parser.add_argument("--sample-levels", type=float, nargs="+", default=[0.025, 0.05, 0.09, 0.15, 0.24, 0.36, 0.52])
     parser.add_argument("--pvalue-threshold", type=float, default=0.05)
     parser.add_argument("--min-log-fold-change", type=float, default=0.0)
@@ -257,7 +262,7 @@ def draw_component_fallback_contours(
 def build_background_cmap() -> mcolors.Colormap:
     return mcolors.LinearSegmentedColormap.from_list(
         "soft_background_grey",
-        ["#ffffff", "#ffffff", "#e0e0e0", "#b8b8b8", "#7a7a7a"],
+        ["#ffffff", "#fcfcfc", "#f5f5f5", "#ececec", "#e1e1e1", "#d3d3d3", "#bdbdbd", "#a3a3a3"],
     )
 
 
@@ -295,9 +300,9 @@ def draw_background_contours(
             yy,
             density,
             levels=levels,
-            colors=["#b3b3b3"] * len(levels),
-            linewidths=np.linspace(0.75, 1.25, len(levels)),
-            alpha=0.95,
+            colors=["#bdbdbd"] * len(levels),
+            linewidths=np.linspace(0.4, 0.95, len(levels)),
+            alpha=0.72,
             zorder=1,
         )
 
