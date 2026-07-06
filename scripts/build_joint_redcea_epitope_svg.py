@@ -14,6 +14,20 @@ os.environ.setdefault("MPLCONFIGDIR", str(MPL_CONFIG_DIR))
 import matplotlib
 
 matplotlib.use("Agg")
+matplotlib.rcParams.update(
+    {
+        "font.family": "serif",
+        "font.serif": ["STIX Two Text", "Times New Roman", "STIXGeneral", "DejaVu Serif"],
+        "mathtext.fontset": "stix",
+        "font.size": 14,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "svg.fonttype": "none",
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "savefig.dpi": 300,
+    }
+)
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -411,47 +425,59 @@ def add_legends(
     epitope_order: list[str],
     styles: dict[str, EpitopeStyle],
 ) -> None:
-    handles = [
-        mlines.Line2D([], [], color="#d0d0d0", linewidth=1.0, label="Background contours"),
-    ]
+    point_handles = []
     for epitope in epitope_order:
         style = styles[epitope]
-        handles.append(
+        point_handles.append(
+            mlines.Line2D(
+                [],
+                [],
+                color=style.fill_high,
+                linewidth=1.8,
+                marker=None,
+                label=epitope,
+            )
+        )
+        point_handles.append(
             mlines.Line2D(
                 [],
                 [],
                 color=style.fill_low,
                 marker="o",
                 markerfacecolor=style.fill_low,
-                markeredgecolor=style.fill_low,
-                markeredgewidth=0.0,
+                markeredgecolor=style.outline,
+                markeredgewidth=1.0,
                 linewidth=0.0,
-                label=f"{epitope} sample outside clusters",
+                label="outside clusters",
             )
         )
-        handles.append(
+        point_handles.append(
             mlines.Line2D(
                 [],
                 [],
                 color=style.fill_high,
                 marker="o",
                 markerfacecolor=style.fill_high,
-                markeredgecolor=style.fill_high,
-                markeredgewidth=0.0,
+                markeredgecolor="#202020",
+                markeredgewidth=0.9,
                 linewidth=0.0,
-                label=f"{epitope} sample in clusters",
+                label="in clusters",
             )
         )
-        handles.append(
-            mlines.Line2D(
-                [],
-                [],
-                color=style.fill_high,
-                linewidth=1.4,
-                label=f"{epitope} sample density",
-            )
-        )
-    ax.legend(handles=handles, loc="upper left", frameon=False, fontsize=10)
+    points_legend = ax.legend(
+        handles=point_handles,
+        loc="upper left",
+        bbox_to_anchor=(0.0, 1.0),
+        frameon=True,
+        fontsize=13,
+        handlelength=1.4,
+        labelspacing=0.5,
+    )
+    points_legend.get_frame().set_facecolor("white")
+    points_legend.get_frame().set_edgecolor("#c7c7c7")
+    points_legend.get_frame().set_linewidth(0.8)
+    points_legend.get_frame().set_alpha(0.95)
+    ax.add_artist(points_legend)
 
 
 def save_metadata(
@@ -551,7 +577,7 @@ def main() -> None:
         spine.set_visible(False)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.output, format="svg", dpi=300, bbox_inches="tight", transparent=False)
+    fig.savefig(args.output, format="svg", bbox_inches="tight", transparent=False)
     plt.close(fig)
 
     save_metadata(
