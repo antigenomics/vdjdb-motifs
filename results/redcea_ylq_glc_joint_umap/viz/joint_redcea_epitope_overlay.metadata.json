@@ -1,0 +1,80 @@
+{
+  "input_root": "C:\\Users\\lizzka239\\projects\\vdjdb-motifs\\results\\redcea_ylq_glc_joint_umap",
+  "coords_file": "C:\\Users\\lizzka239\\projects\\vdjdb-motifs\\results\\redcea_ylq_glc_joint_umap\\trb_vdjdb_clonotype_coords_2d.tsv",
+  "background_file": "C:\\Users\\lizzka239\\projects\\vdjdb-motifs\\results\\redcea_ylq_glc_joint_umap\\trb_background_coords_2d.tsv",
+  "summary_files": {
+    "GLCTLVAML": "C:\\Users\\lizzka239\\projects\\vdjdb-motifs\\results\\redcea_ylq_glc_joint_umap\\per_epitope_cluster_runs\\trb_vdjdb_GLCTLVAML\\vdbscan_leiden_k8_ek8_res0p5_min3_epssample_symasymmetric\\trb_vdjdb_GLCTLVAML_summary_tcrempnet.tsv",
+    "YLQPRTFLL": "C:\\Users\\lizzka239\\projects\\vdjdb-motifs\\results\\redcea_ylq_glc_joint_umap\\per_epitope_cluster_runs\\trb_vdjdb_YLQPRTFLL\\vdbscan_leiden_k12_ek8_res1p0_min3_epsbackground_symasymmetric\\trb_vdjdb_YLQPRTFLL_summary_tcrempnet.tsv"
+  },
+  "output": "C:\\Users\\lizzka239\\projects\\vdjdb-motifs\\results\\redcea_ylq_glc_joint_umap\\viz\\joint_redcea_epitope_overlay.svg",
+  "bins": 240,
+  "background_sigma": 2.4,
+  "epitope_kde_bw": {
+    "GLCTLVAML": 0.08,
+    "YLQPRTFLL": 0.12
+  },
+  "epitope_fill_alpha": {
+    "GLCTLVAML": 0.42,
+    "YLQPRTFLL": 0.68
+  },
+  "epitope_line_alpha": {
+    "GLCTLVAML": 0.72,
+    "YLQPRTFLL": 0.88
+  },
+  "background_levels": [
+    0.1,
+    0.18,
+    0.3,
+    0.46,
+    0.66
+  ],
+  "sample_levels": [
+    0.025,
+    0.05,
+    0.09,
+    0.15,
+    0.24,
+    0.36,
+    0.52
+  ],
+  "pvalue_threshold": 0.05,
+  "min_log_fold_change": 0.0,
+  "contour_stats": {
+    "GLCTLVAML": {
+      "cluster_points_enriched": 431
+    },
+    "YLQPRTFLL": {
+      "cluster_points_enriched": 443
+    }
+  },
+  "sample_density_stats": {
+    "GLCTLVAML": {
+      "density_max": 0.05223589167616585,
+      "drawn": 1,
+      "points_used": 431,
+      "fallback_islands": 0
+    },
+    "YLQPRTFLL": {
+      "density_max": 0.160762170694429,
+      "drawn": 1,
+      "points_used": 443,
+      "fallback_islands": 0
+    }
+  },
+  "epitope_counts": {
+    "GLCTLVAML": {
+      "sample_points": 1200,
+      "cluster_points_any": 968,
+      "cluster_points_enriched": 431,
+      "cluster_ids_any": 247,
+      "cluster_ids_enriched": 61
+    },
+    "YLQPRTFLL": {
+      "sample_points": 902,
+      "cluster_points_any": 443,
+      "cluster_points_enriched": 443,
+      "cluster_ids_any": 66,
+      "cluster_ids_enriched": 66
+    }
+  }
+}
